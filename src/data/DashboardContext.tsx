@@ -9,6 +9,8 @@ import {
 import { seedData } from './seed'
 import type {
   ActivityLog,
+  Apartment,
+  Building,
   ContactChannel,
   DashboardState,
   Invoice,
@@ -21,7 +23,9 @@ import type {
   PaymentMethod,
   PaymentStatus,
   PaymentType,
+  Tenant,
 } from './types'
+import { isUnitVacant } from './unitHelpers'
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -50,6 +54,33 @@ interface AddPaymentInput {
   note?: string
 }
 
+export interface UnitInput {
+  buildingId: string
+  unitNumber: string
+  rent: number
+  deposit: number
+  landlordId: string
+  status?: Apartment['status']
+  nextDueDate?: string
+}
+
+export interface BuildingInput {
+  name: string
+  address: string
+}
+
+export interface CompleteApplicationInput {
+  apartmentId: string
+  name: string
+  email: string
+  phone: string
+  whatsapp?: string
+  leaseStart: string
+  leaseEnd: string
+  agentName?: string
+  moveInSummary?: string
+}
+
 interface DashboardContextValue {
   state: DashboardState
   createInvoice: (input: CreateInvoiceInput) => Invoice
@@ -70,6 +101,11 @@ interface DashboardContextValue {
     channel: ContactChannel
     body: string
   }) => void
+  addBuilding: (input: BuildingInput) => Building
+  addUnit: (input: UnitInput) => Apartment
+  updateUnit: (id: string, input: Partial<UnitInput>) => void
+  deleteUnit: (id: string) => { ok: boolean; error?: string }
+  completeApplication: (input: CompleteApplicationInput) => Tenant | null
   getBuilding: (id: string) => DashboardState['buildings'][0] | undefined
   getApartment: (id: string) => DashboardState['apartments'][0] | undefined
   getLandlord: (id: string) => DashboardState['landlords'][0] | undefined
@@ -227,6 +263,114 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [],
   )
 
+  const addBuilding = useCallback((input: BuildingInput) => {
+    const building: Building = {
+      id: uid('b'),
+      name: input.name.trim(),
+      address: input.address.trim(),
+    }
+    setState((prev) => ({ ...prev, buildings: [...prev.buildings, building] }))
+    return building
+  }, [])
+
+  const addUnit = useCallback((input: UnitInput) => {
+    const apartment: Apartment = {
+      id: uid('a'),
+      buildingId: input.buildingId,
+      unitNumber: input.unitNumber.trim(),
+      rent: input.rent,
+      deposit: input.deposit,
+      landlordId: input.landlordId,
+      status: input.status ?? 'vacant',
+      nextDueDate: input.nextDueDate,
+    }
+    setState((prev) => ({
+      ...prev,
+      apartments: [...prev.apartments, apartment],
+    }))
+    return apartment
+  }, [])
+
+  const updateUnit = useCallback((id: string, input: Partial<UnitInput>) => {
+    setState((prev) => ({
+      ...prev,
+      apartments: prev.apartments.map((a) => {
+        if (a.id !== id) return a
+        return {
+          ...a,
+          buildingId: input.buildingId ?? a.buildingId,
+          unitNumber: input.unitNumber?.trim() ?? a.unitNumber,
+          rent: input.rent ?? a.rent,
+          deposit: input.deposit ?? a.deposit,
+          landlordId: input.landlordId ?? a.landlordId,
+          status: input.status ?? a.status,
+          nextDueDate:
+            input.nextDueDate !== undefined ? input.nextDueDate : a.nextDueDate,
+        }
+      }),
+    }))
+  }, [])
+
+  const deleteUnit = useCallback((id: string) => {
+    let blocked = false
+    setState((prev) => {
+      if (!isUnitVacant(id, prev.tenants)) {
+        blocked = true
+        return prev
+      }
+      return {
+        ...prev,
+        apartments: prev.apartments.filter((a) => a.id !== id),
+      }
+    })
+    return blocked
+      ? { ok: false, error: 'Only vacant (unassigned) units can be deleted.' }
+      : { ok: true }
+  }, [])
+
+  const completeApplication = useCallback((input: CompleteApplicationInput): Tenant | null => {
+    const tenantId = uid('t')
+    const tenant: Tenant = {
+      id: tenantId,
+      apartmentId: input.apartmentId,
+      name: input.name.trim() || 'New tenant',
+      email: input.email.trim() || 'tenant@example.com',
+      phone: input.phone.trim() || '',
+      whatsapp: input.whatsapp,
+      leaseStart: input.leaseStart || nowIso().slice(0, 10),
+      leaseEnd: input.leaseEnd || nowIso().slice(0, 10),
+      status: 'active',
+      balance: 0,
+      moveInInspection: input.moveInSummary
+        ? {
+            date: nowIso().slice(0, 10),
+            agent: input.agentName || 'Agent',
+            summary: input.moveInSummary,
+          }
+        : undefined,
+    }
+
+    let ok = false
+    setState((prev) => {
+      const apartment = prev.apartments.find((a) => a.id === input.apartmentId)
+      if (!apartment || !isUnitVacant(input.apartmentId, prev.tenants)) {
+        return prev
+      }
+      ok = true
+      const nextDue = input.leaseStart || nowIso().slice(0, 10)
+      return {
+        ...prev,
+        tenants: [tenant, ...prev.tenants],
+        apartments: prev.apartments.map((a) =>
+          a.id === input.apartmentId
+            ? { ...a, status: 'occupied' as const, nextDueDate: nextDue }
+            : a,
+        ),
+      }
+    })
+    return ok ? tenant : null
+  }, [])
+
   const getBuilding = useCallback(
     (id: string) => state.buildings.find((b) => b.id === id),
     [state.buildings],
@@ -268,6 +412,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setIssueStatus,
       logLandlordUpdate,
       logActivity,
+      addBuilding,
+      addUnit,
+      updateUnit,
+      deleteUnit,
+      completeApplication,
       getBuilding,
       getApartment,
       getLandlord,
@@ -283,6 +432,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setIssueStatus,
       logLandlordUpdate,
       logActivity,
+      addBuilding,
+      addUnit,
+      updateUnit,
+      deleteUnit,
+      completeApplication,
       getBuilding,
       getApartment,
       getLandlord,

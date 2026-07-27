@@ -4,6 +4,7 @@ import './DashboardShell.css'
 const NAV = [
   { to: '/', label: 'Portfolio', end: true },
   { to: '/tenants', label: 'Tenants' },
+  { to: '/units', label: 'Units' },
   { to: '/payments', label: 'Payments' },
   { to: '/invoices', label: 'Invoices' },
   { to: '/issues', label: 'Issues' },

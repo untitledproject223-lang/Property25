@@ -1,26 +1,34 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useDashboard } from '../data/DashboardContext'
+import { isUnitVacant } from '../data/unitHelpers'
 import { formatMoney, paymentBadge, formatDate } from '../data/utils'
+
+type TableFilter = 'all' | 'active' | 'vacant' | 'balance' | 'issues'
 
 export default function PortfolioPage() {
   const { state } = useDashboard()
   const [buildingId, setBuildingId] = useState('')
+  const [filter, setFilter] = useState<TableFilter>('all')
 
   const activeTenants = state.tenants.filter((t) => t.status !== 'former').length
-  const vacantUnits = state.apartments.filter((a) => a.status === 'vacant').length
+  const vacantUnits = state.apartments.filter((a) =>
+    isUnitVacant(a.id, state.tenants),
+  ).length
   const openIssues = state.issues.filter((i) => i.status !== 'resolved').length
   const overduePayments = state.tenants.filter((t) => t.balance > 0).length
-  const rentDue = state.apartments
-    .filter((a) => a.status !== 'vacant')
-    .reduce((sum, a) => sum + a.rent, 0)
 
   const rows = useMemo(() => {
     return state.apartments
       .filter((a) => !buildingId || a.buildingId === buildingId)
       .map((apartment) => {
         const building = state.buildings.find((b) => b.id === apartment.buildingId)!
-        const tenant = state.tenants.find((t) => t.apartmentId === apartment.id)
+        const tenant = state.tenants.find(
+          (t) =>
+            t.apartmentId === apartment.id &&
+            (t.status === 'active' || t.status === 'notice'),
+        )
+        const vacant = isUnitVacant(apartment.id, state.tenants)
         const openIssueCount = tenant
           ? state.issues.filter(
               (i) => i.tenantId === tenant.id && i.status !== 'resolved',
@@ -29,67 +37,114 @@ export default function PortfolioPage() {
         const badge = tenant
           ? paymentBadge(tenant.balance, apartment.nextDueDate)
           : { label: 'Vacant', tone: 'neutral' as const }
-        return { apartment, building, tenant, openIssueCount, badge }
+        return { apartment, building, tenant, vacant, openIssueCount, badge }
       })
-  }, [state, buildingId])
+      .filter((row) => {
+        if (filter === 'active') return Boolean(row.tenant)
+        if (filter === 'vacant') return row.vacant
+        if (filter === 'balance') return Boolean(row.tenant && row.tenant.balance > 0)
+        if (filter === 'issues') return row.openIssueCount > 0
+        return true
+      })
+  }, [state, buildingId, filter])
+
+  function toggleFilter(next: TableFilter) {
+    setFilter((prev) => (prev === next ? 'all' : next))
+  }
+
+  const filterLabel =
+    filter === 'active'
+      ? 'Active tenants'
+      : filter === 'vacant'
+        ? 'Vacant units'
+        : filter === 'balance'
+          ? 'Balances due'
+          : filter === 'issues'
+            ? 'Open issues'
+            : null
 
   return (
     <div>
       <div className="page-header">
         <div>
           <h1>Portfolio</h1>
-          <p>Overview of buildings, units, and onboarded tenants across your book.</p>
+          <p>Overview of tenants and units across your book.</p>
         </div>
         <Link to="/apply" className="btn btn-primary btn-compact">
           New application
         </Link>
       </div>
 
-      <div className="stat-grid">
-        <div className="stat-card">
+      <div className="stat-grid stat-grid-4">
+        <button
+          type="button"
+          className={`stat-card stat-card-btn${filter === 'active' ? ' active' : ''}`}
+          onClick={() => toggleFilter('active')}
+        >
           <div className="label">Active tenants</div>
           <div className="value">{activeTenants}</div>
-        </div>
-        <div className="stat-card">
+        </button>
+        <button
+          type="button"
+          className={`stat-card stat-card-btn${filter === 'vacant' ? ' active' : ''}`}
+          onClick={() => toggleFilter('vacant')}
+        >
           <div className="label">Units vacant</div>
           <div className="value">{vacantUnits}</div>
-        </div>
-        <div className="stat-card">
-          <div className="label">Rent book / mo</div>
-          <div className="value">{formatMoney(rentDue)}</div>
-        </div>
-        <div className="stat-card">
+        </button>
+        <button
+          type="button"
+          className={`stat-card stat-card-btn${filter === 'balance' ? ' active' : ''}`}
+          onClick={() => toggleFilter('balance')}
+        >
           <div className="label">Balances due</div>
           <div className="value">{overduePayments}</div>
-        </div>
-        <div className="stat-card">
+        </button>
+        <button
+          type="button"
+          className={`stat-card stat-card-btn${filter === 'issues' ? ' active' : ''}`}
+          onClick={() => toggleFilter('issues')}
+        >
           <div className="label">Open issues</div>
           <div className="value">{openIssues}</div>
-        </div>
+        </button>
       </div>
 
       <div className="panel">
         <div className="panel-header">
-          <h2>Apartments</h2>
-          <select
-            value={buildingId}
-            onChange={(e) => setBuildingId(e.target.value)}
-            aria-label="Filter by building"
-          >
-            <option value="">All buildings</option>
-            {state.buildings.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+          <h2>
+            {filterLabel ? `Filtered: ${filterLabel}` : 'Tenants & units'}
+          </h2>
+          <div className="btn-row">
+            {filter !== 'all' ? (
+              <button
+                type="button"
+                className="btn btn-ghost btn-compact"
+                onClick={() => setFilter('all')}
+              >
+                Clear filter
+              </button>
+            ) : null}
+            <select
+              value={buildingId}
+              onChange={(e) => setBuildingId(e.target.value)}
+              aria-label="Filter by building"
+            >
+              <option value="">All buildings</option>
+              {state.buildings.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
         <div className="panel-body" style={{ paddingTop: 0 }}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Building / unit</th>
                 <th>Tenant</th>
+                <th>Building / unit</th>
                 <th>Rent</th>
                 <th>Next due</th>
                 <th>Status</th>
@@ -100,24 +155,29 @@ export default function PortfolioPage() {
               {rows.map(({ apartment, building, tenant, openIssueCount, badge }) => (
                 <tr key={apartment.id}>
                   <td>
+                    {tenant ? (
+                      <>
+                        <Link className="link-quiet" to={`/tenants/${tenant.id}`}>
+                          <strong>{tenant.name}</strong>
+                        </Link>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--ink-muted)' }}>
+                          {tenant.email}
+                        </div>
+                      </>
+                    ) : (
+                      <span style={{ color: 'var(--ink-muted)' }}>No tenant assigned</span>
+                    )}
+                  </td>
+                  <td>
                     <div>
                       <strong>{building.name}</strong>
                     </div>
                     <div style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>
-                      Unit {apartment.unitNumber} · {apartment.status}
+                      Unit {apartment.unitNumber}
                     </div>
                   </td>
-                  <td>
-                    {tenant ? (
-                      <Link className="link-quiet" to={`/tenants/${tenant.id}`}>
-                        {tenant.name}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                  </td>
                   <td>{formatMoney(apartment.rent)}</td>
-                  <td>{formatDate(apartment.nextDueDate)}</td>
+                  <td>{tenant ? formatDate(apartment.nextDueDate) : '—'}</td>
                   <td>
                     <span className={`badge tone-${badge.tone}`}>{badge.label}</span>
                     {openIssueCount > 0 ? (
@@ -132,6 +192,9 @@ export default function PortfolioPage() {
               ))}
             </tbody>
           </table>
+          {rows.length === 0 ? (
+            <div className="empty-state">No rows match this filter.</div>
+          ) : null}
         </div>
       </div>
     </div>

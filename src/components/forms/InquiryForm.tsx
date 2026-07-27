@@ -1,4 +1,7 @@
 import './forms.css'
+import { useDashboard } from '../../data/DashboardContext'
+import { vacantApartments } from '../../data/unitHelpers'
+import { formatMoney } from '../../data/utils'
 
 interface FormProps {
   data: Record<string, unknown>
@@ -11,6 +14,94 @@ function str(data: Record<string, unknown>, key: string) {
 
 function bool(data: Record<string, unknown>, key: string) {
   return data[key] === true
+}
+
+function UnitSelectField({
+  data,
+  onChange,
+}: {
+  data: Record<string, unknown>
+  onChange: (key: string, value: unknown) => void
+}) {
+  const { state } = useDashboard()
+  const vacant = vacantApartments(state.apartments, state.tenants)
+  const selectedId = str(data, 'apartmentId')
+  const selected = state.apartments.find((a) => a.id === selectedId)
+  const building = selected
+    ? state.buildings.find((b) => b.id === selected.buildingId)
+    : undefined
+
+  function selectUnit(id: string) {
+    const apartment = state.apartments.find((a) => a.id === id)
+    const b = apartment
+      ? state.buildings.find((x) => x.id === apartment.buildingId)
+      : undefined
+    onChange('apartmentId', id)
+    if (apartment && b) {
+      onChange('propertyAddress', `${b.address}, Unit ${apartment.unitNumber}`)
+      onChange('unitNumber', apartment.unitNumber)
+      onChange('apartmentAmount', String(apartment.rent))
+      onChange('listingRef', `${b.name}-${apartment.unitNumber}`)
+      onChange('amountType', 'monthly-rent')
+    } else {
+      onChange('propertyAddress', '')
+      onChange('unitNumber', '')
+      onChange('apartmentAmount', '')
+      onChange('listingRef', '')
+    }
+  }
+
+  return (
+    <>
+      <label className="field field-span">
+        <span className="field-label">Select onboarded unit</span>
+        <select
+          value={selectedId}
+          onChange={(e) => selectUnit(e.target.value)}
+        >
+          <option value="">Choose a vacant unit…</option>
+          {vacant.map((apartment) => {
+            const b = state.buildings.find((x) => x.id === apartment.buildingId)
+            return (
+              <option key={apartment.id} value={apartment.id}>
+                {b?.name ?? 'Building'} · Unit {apartment.unitNumber} ·{' '}
+                {formatMoney(apartment.rent)}/mo
+              </option>
+            )
+          })}
+        </select>
+        <span className="field-hint">
+          Only vacant (unassigned) units appear here. Onboard more under Units.
+        </span>
+      </label>
+      {selected && building ? (
+        <>
+          <label className="field field-span">
+            <span className="field-label">Property address</span>
+            <input type="text" value={building.address} readOnly />
+          </label>
+          <label className="field">
+            <span className="field-label">Unit number</span>
+            <input type="text" value={selected.unitNumber} readOnly />
+          </label>
+          <label className="field">
+            <span className="field-label">Monthly rent</span>
+            <input type="text" value={formatMoney(selected.rent)} readOnly />
+          </label>
+          <label className="field">
+            <span className="field-label">Deposit</span>
+            <input type="text" value={formatMoney(selected.deposit)} readOnly />
+          </label>
+        </>
+      ) : null}
+      {vacant.length === 0 ? (
+        <p className="section-lead">
+          No vacant units available. Add units from the Units menu before starting an
+          application.
+        </p>
+      ) : null}
+    </>
+  )
 }
 
 function FileField({
@@ -193,55 +284,8 @@ export function InquiryForm({ data, onChange }: FormProps) {
       </fieldset>
 
       <fieldset className="form-section">
-        <legend>Apartment & agreement</legend>
-        <label className="field field-span">
-          <span className="field-label">Apartment address</span>
-          <input
-            type="text"
-            value={str(data, 'propertyAddress')}
-            onChange={(e) => onChange('propertyAddress', e.target.value)}
-            placeholder="142 Maple Street, Unit 4B"
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Unit / apartment number</span>
-          <input
-            type="text"
-            value={str(data, 'unitNumber')}
-            onChange={(e) => onChange('unitNumber', e.target.value)}
-            placeholder="4B"
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Property / listing reference</span>
-          <input
-            type="text"
-            value={str(data, 'listingRef')}
-            onChange={(e) => onChange('listingRef', e.target.value)}
-            placeholder="LST-20481"
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Apartment amount (rent / price)</span>
-          <input
-            type="number"
-            min={0}
-            value={str(data, 'apartmentAmount')}
-            onChange={(e) => onChange('apartmentAmount', e.target.value)}
-            placeholder="2400"
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Amount type</span>
-          <select
-            value={str(data, 'amountType')}
-            onChange={(e) => onChange('amountType', e.target.value)}
-          >
-            <option value="">Select…</option>
-            <option value="monthly-rent">Monthly rent</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
+        <legend>Unit & agreement</legend>
+        <UnitSelectField data={data} onChange={onChange} />
         <label className="field">
           <span className="field-label">Agreement term</span>
           <input
@@ -276,7 +320,7 @@ export function InquiryForm({ data, onChange }: FormProps) {
             rows={3}
             value={str(data, 'applicationNotes')}
             onChange={(e) => onChange('applicationNotes', e.target.value)}
-            placeholder="Any other basic details about the applicant or apartment…"
+            placeholder="Any other basic details about the applicant…"
           />
         </label>
       </fieldset>

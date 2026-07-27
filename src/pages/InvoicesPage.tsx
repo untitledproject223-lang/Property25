@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useDashboard } from '../data/DashboardContext'
 import type { InvoiceItem, InvoiceItemType } from '../data/types'
 import { formatDate, formatMoney, statusTone } from '../data/utils'
+import { generateInvoicePdf } from '../utils/invoicePdf'
 import './TenantDetail.css'
 
 export default function InvoicesPage() {
@@ -18,6 +19,8 @@ export default function InvoicesPage() {
   const [includeAdmin, setIncludeAdmin] = useState(false)
   const [adminAmount, setAdminAmount] = useState('350')
   const [notes, setNotes] = useState('')
+  const [pdfError, setPdfError] = useState('')
+  const [pdfBusy, setPdfBusy] = useState(false)
 
   const invoices = useMemo(() => {
     return state.invoices
@@ -59,6 +62,29 @@ export default function InvoicesPage() {
     })
     setSelectedId(inv.id)
     setNotes('')
+  }
+
+  function downloadPdf() {
+    if (!selected || !selectedCtx) return
+    setPdfError('')
+    setPdfBusy(true)
+    try {
+      generateInvoicePdf(selected, {
+        tenantName: selectedCtx.tenant.name,
+        tenantEmail: selectedCtx.tenant.email,
+        tenantPhone: selectedCtx.tenant.phone,
+        buildingName: selectedCtx.building.name,
+        buildingAddress: selectedCtx.building.address,
+        unitNumber: selectedCtx.apartment.unitNumber,
+        landlordName: selectedCtx.landlord.name,
+        rent: selectedCtx.apartment.rent,
+        deposit: selectedCtx.apartment.deposit,
+      })
+    } catch (err) {
+      setPdfError(err instanceof Error ? err.message : 'Could not generate PDF.')
+    } finally {
+      setPdfBusy(false)
+    }
   }
 
   return (
@@ -137,49 +163,6 @@ export default function InvoicesPage() {
             </table>
             {invoices.length === 0 ? (
               <div className="empty-state">No invoices match this filter.</div>
-            ) : null}
-
-            {selected && selectedCtx ? (
-              <div className="invoice-view">
-                <h3>
-                  Invoice for {selectedCtx.tenant.name} · {selectedCtx.building.name} Unit{' '}
-                  {selectedCtx.apartment.unitNumber}
-                </h3>
-                <ul>
-                  {selected.items.map((item, idx) => (
-                    <li key={idx}>
-                      {item.description}: {formatMoney(item.amount)}
-                    </li>
-                  ))}
-                </ul>
-                <p>
-                  <strong>Total: {formatMoney(selected.total)}</strong>
-                </p>
-                {selected.notes ? <p className="muted">{selected.notes}</p> : null}
-                <div className="btn-row">
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-compact"
-                    onClick={() => updateInvoiceStatus(selected.id, 'sent')}
-                  >
-                    Mark sent
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-compact"
-                    onClick={() => updateInvoiceStatus(selected.id, 'paid')}
-                  >
-                    Mark paid
-                  </button>
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-compact"
-                    onClick={() => updateInvoiceStatus(selected.id, 'overdue')}
-                  >
-                    Mark overdue
-                  </button>
-                </div>
-              </div>
             ) : null}
           </div>
         </div>
@@ -267,6 +250,64 @@ export default function InvoicesPage() {
               Create invoice
             </button>
           </form>
+
+          {selected && selectedCtx ? (
+            <div className="panel-body" style={{ paddingTop: 0 }}>
+              <div className="invoice-view">
+                <h3>
+                  Invoice for {selectedCtx.tenant.name} · {selectedCtx.building.name} Unit{' '}
+                  {selectedCtx.apartment.unitNumber}
+                </h3>
+                <ul>
+                  {selected.items.map((item, idx) => (
+                    <li key={idx}>
+                      {item.description}: {formatMoney(item.amount)}
+                    </li>
+                  ))}
+                </ul>
+                <p>
+                  <strong>Total: {formatMoney(selected.total)}</strong>
+                </p>
+                {selected.notes ? <p className="muted">{selected.notes}</p> : null}
+                {pdfError ? (
+                  <p className="muted" style={{ color: '#9b2c2c' }}>
+                    {pdfError}
+                  </p>
+                ) : null}
+                <div className="btn-row">
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-compact"
+                    onClick={downloadPdf}
+                    disabled={pdfBusy}
+                  >
+                    {pdfBusy ? 'Generating PDF…' : 'Download PDF invoice'}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-compact"
+                    onClick={() => updateInvoiceStatus(selected.id, 'sent')}
+                  >
+                    Mark sent
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-compact"
+                    onClick={() => updateInvoiceStatus(selected.id, 'paid')}
+                  >
+                    Mark paid
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-compact"
+                    onClick={() => updateInvoiceStatus(selected.id, 'overdue')}
+                  >
+                    Mark overdue
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>
