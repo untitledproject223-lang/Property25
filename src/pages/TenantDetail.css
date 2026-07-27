@@ -1,0 +1,213 @@
+.tenant-hero {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.tenant-avatar {
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 1rem;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(145deg, var(--teal), var(--sky));
+  color: #fff;
+  font-weight: 700;
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.tenant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 1.1rem;
+  padding: 0.35rem;
+  background: rgba(255, 255, 255, 0.55);
+  border: 1px solid rgba(201, 194, 180, 0.7);
+  border-radius: 14px;
+}
+
+.tenant-tab {
+  border: none;
+  background: transparent;
+  padding: 0.55rem 0.85rem;
+  border-radius: 10px;
+  font-weight: 600;
+  color: var(--ink-muted);
+  font-size: 0.88rem;
+}
+
+.tenant-tab.active {
+  background: var(--teal);
+  color: #f4fffe;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.detail-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.detail-list > div {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.detail-list span {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.form-stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.form-stack label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.form-stack input,
+.form-stack select,
+.form-stack textarea {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffdf9;
+  padding: 0.65rem 0.8rem;
+  font: inherit;
+  font-weight: 400;
+}
+
+.check-inline {
+  display: flex !important;
+  align-items: center;
+  gap: 0.55rem;
+  font-weight: 500 !important;
+}
+
+.check-inline input {
+  width: 1.05rem;
+  height: 1.05rem;
+  accent-color: var(--teal);
+}
+
+.muted {
+  color: var(--ink-muted);
+  font-size: 0.9rem;
+}
+
+.timeline-list,
+.message-thread {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.timeline-list li,
+.message-thread li {
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(201, 194, 180, 0.65);
+}
+
+.msg-meta {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--ink-muted);
+  margin-bottom: 0.25rem;
+}
+
+.msg-tenant {
+  border-left: 3px solid var(--sky);
+}
+
+.msg-agent {
+  border-left: 3px solid var(--teal);
+}
+
+.msg-landlord {
+  border-left: 3px solid var(--amber);
+}
+
+.issue-list {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.issue-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(201, 194, 180, 0.7);
+  background: #fffdf9;
+  border-radius: 12px;
+  padding: 0.75rem 0.85rem;
+  font: inherit;
+}
+
+.issue-item.active {
+  border-color: var(--teal);
+  background: var(--teal-soft);
+}
+
+.invoice-view {
+  margin-top: 1rem;
+  padding: 1rem;
+  border-radius: 14px;
+  background: rgba(215, 236, 234, 0.35);
+  border: 1px solid #9fcfc9;
+}
+
+.invoice-view h3 {
+  margin-bottom: 0.5rem;
+  font-size: 1.05rem;
+}
+
+.invoice-view ul {
+  margin: 0 0 0.75rem;
+  padding-left: 1.1rem;
+}
+
+.moveout-placeholder {
+  margin-top: 1.25rem;
+  padding: 1rem;
+  border-radius: 14px;
+  border: 1px dashed var(--line);
+  background: rgba(245, 230, 210, 0.35);
+}
+
+.moveout-placeholder h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.moveout-placeholder p {
+  margin: 0;
+  color: var(--ink-muted);
+}
+
+@media (max-width: 900px) {
+  .detail-grid {
+    grid-template-columns: 1fr;
+  }
+}

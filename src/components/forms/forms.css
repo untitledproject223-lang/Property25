@@ -1,0 +1,404 @@
+.form-grid {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.role-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.95rem 1.1rem;
+  border-radius: var(--radius);
+  border: 1px solid transparent;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.role-callout strong {
+  font-size: 0.95rem;
+}
+
+.role-callout span {
+  color: var(--ink-muted);
+}
+
+.role-callout.role-agent {
+  background: rgba(217, 234, 244, 0.7);
+  border-color: #9fc3d9;
+  color: #1f5574;
+}
+
+.role-callout.role-applicant {
+  background: rgba(215, 236, 234, 0.75);
+  border-color: #9fcfc9;
+  color: var(--teal-deep);
+}
+
+.role-callout.role-shared {
+  background: rgba(245, 230, 210, 0.7);
+  border-color: #e2c49a;
+  color: #8a5414;
+}
+
+.kyc-report-banner,
+.completion-summary {
+  padding: 1.1rem 1.2rem;
+  border-radius: var(--radius);
+  background: linear-gradient(120deg, var(--sky-soft), rgba(255, 255, 255, 0.7));
+  border: 1px solid #9fc3d9;
+}
+
+.kyc-report-title,
+.completion-summary h3 {
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  margin: 0 0 0.35rem;
+  color: var(--ink);
+}
+
+.kyc-report-sub,
+.completion-summary p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+}
+
+.completion-summary {
+  background: linear-gradient(120deg, var(--green-soft), rgba(255, 255, 255, 0.7));
+  border-color: #b5d7c2;
+}
+
+.banking-card {
+  padding: 1.2rem 1.3rem;
+  border-radius: var(--radius);
+  background: linear-gradient(145deg, #1a3d4a 0%, #0f6e6a 100%);
+  color: #f4fffe;
+  box-shadow: 0 14px 36px rgba(15, 110, 106, 0.28);
+}
+
+.banking-card h3 {
+  margin: 0 0 1rem;
+  font-size: 1.15rem;
+  color: #fff;
+}
+
+.banking-details {
+  margin: 0;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.banking-details > div {
+  display: grid;
+  grid-template-columns: 8.5rem 1fr;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.banking-details dt {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.75;
+}
+
+.banking-details dd {
+  margin: 0;
+}
+
+.banking-details input {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  padding: 0.55rem 0.75rem;
+  font-weight: 600;
+}
+
+.banking-details input:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.65);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.12);
+}
+
+.banking-hint {
+  margin: 1rem 0 0;
+  font-size: 0.85rem;
+  opacity: 0.85;
+}
+
+.pdf-signer {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.pdf-preview {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: #fffdf9;
+}
+
+.pdf-preview-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: #efece4;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.pdf-file-name {
+  color: var(--ink-muted);
+  font-weight: 500;
+}
+
+.pdf-preview-body {
+  padding: 1.5rem 1.25rem 1.75rem;
+  min-height: 14rem;
+  background:
+    linear-gradient(#fffdf9, #fffdf9),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 27px,
+      rgba(201, 194, 180, 0.35) 28px
+    );
+}
+
+.pdf-doc-title {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  margin: 0 0 1rem;
+  letter-spacing: 0.04em;
+}
+
+.pdf-preview-body p {
+  margin: 0 0 0.45rem;
+  color: var(--ink-muted);
+}
+
+.pdf-preview-note {
+  margin-top: 1.25rem !important;
+  font-size: 0.85rem;
+  font-style: italic;
+}
+
+.signature-grid {
+  display: grid;
+  gap: 1rem;
+}
+
+.signature-block {
+  margin: 0;
+  padding: 1rem 1.1rem 1.15rem;
+  border: 1px solid #e2c49a;
+  border-radius: var(--radius);
+  background: rgba(245, 230, 210, 0.35);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+.signature-block legend {
+  padding: 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 600;
+}
+
+.signature-input {
+  font-family: 'Fraunces', Georgia, serif !important;
+  font-size: 1.35rem !important;
+  font-style: italic;
+  min-height: 3rem;
+}
+
+.inspection-section {
+  grid-template-columns: 1fr;
+}
+
+.inspection-list {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 0.65rem;
+}
+
+.inspection-item {
+  display: grid;
+  grid-template-columns: minmax(10rem, 1.4fr) minmax(8rem, 0.8fr) minmax(10rem, 1.2fr);
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid rgba(201, 194, 180, 0.7);
+}
+
+.inspection-item-label {
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.inspection-item select,
+.inspection-item input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fffdf9;
+  padding: 0.55rem 0.7rem;
+}
+
+@media (min-width: 900px) {
+  .signature-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .signature-block {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .banking-details > div {
+    grid-template-columns: 1fr;
+  }
+
+  .inspection-item {
+    grid-template-columns: 1fr;
+  }
+
+  .signature-block {
+    grid-template-columns: 1fr;
+  }
+}
+
+.form-section {
+  margin: 0;
+  padding: 1.1rem 1.15rem 1.2rem;
+  border: 1px solid rgba(201, 194, 180, 0.9);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.55);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.95rem 1rem;
+}
+
+.form-section legend {
+  padding: 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.form-section.accent-legal {
+  background: rgba(245, 230, 210, 0.35);
+  border-color: #e2c49a;
+}
+
+.form-section.accent-closing {
+  background: rgba(217, 238, 226, 0.45);
+  border-color: #b5d7c2;
+}
+
+.section-lead {
+  grid-column: 1 / -1;
+  color: var(--ink-muted);
+  font-size: 0.92rem;
+  margin-bottom: 0.15rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.field-span {
+  grid-column: 1 / -1;
+}
+
+.field-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
+.field input[type='text'],
+.field input[type='email'],
+.field input[type='tel'],
+.field input[type='number'],
+.field input[type='date'],
+.field select,
+.field textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fffdf9;
+  padding: 0.7rem 0.85rem;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field textarea {
+  resize: vertical;
+  min-height: 5rem;
+}
+
+.field input:focus,
+.field select:focus,
+.field textarea:focus {
+  border-color: var(--teal);
+  box-shadow: 0 0 0 3px rgba(15, 110, 106, 0.14);
+}
+
+.file-field input[type='file'] {
+  font-size: 0.85rem;
+  padding: 0.55rem 0;
+}
+
+.file-selected {
+  font-size: 0.82rem;
+  color: var(--teal-deep);
+  font-weight: 500;
+}
+
+.check-field {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.7);
+  border: 1px solid transparent;
+}
+
+.check-field input {
+  margin-top: 0.2rem;
+  accent-color: var(--teal);
+  width: 1.05rem;
+  height: 1.05rem;
+  flex-shrink: 0;
+}
+
+.check-field span {
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+@media (max-width: 720px) {
+  .form-section {
+    grid-template-columns: 1fr;
+  }
+}
