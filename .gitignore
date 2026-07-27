@@ -24,4 +24,6 @@ dist-ssr
 *.sw?
 
 website.zip
+website/assets.zip
+*.zip
 

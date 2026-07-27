@@ -18,6 +18,7 @@ import type {
   InvoiceStatus,
   IssueMessage,
   IssueStatus,
+  Landlord,
   LandlordUpdate,
   Payment,
   PaymentMethod,
@@ -69,6 +70,13 @@ export interface BuildingInput {
   address: string
 }
 
+export interface LandlordInput {
+  name: string
+  email: string
+  phone: string
+  whatsapp?: string
+}
+
 export interface CompleteApplicationInput {
   apartmentId: string
   name: string
@@ -102,6 +110,7 @@ interface DashboardContextValue {
     body: string
   }) => void
   addBuilding: (input: BuildingInput) => Building
+  addLandlord: (input: LandlordInput) => Landlord
   addUnit: (input: UnitInput) => Apartment
   updateUnit: (id: string, input: Partial<UnitInput>) => void
   deleteUnit: (id: string) => { ok: boolean; error?: string }
@@ -273,6 +282,22 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     return building
   }, [])
 
+  const addLandlord = useCallback((input: LandlordInput) => {
+    const phone = input.phone.trim()
+    const landlord: Landlord = {
+      id: uid('l'),
+      name: input.name.trim(),
+      email: input.email.trim(),
+      phone,
+      whatsapp: input.whatsapp?.trim() || phone.replace(/\D/g, '') || undefined,
+    }
+    setState((prev) => ({
+      ...prev,
+      landlords: [landlord, ...prev.landlords],
+    }))
+    return landlord
+  }, [])
+
   const addUnit = useCallback((input: UnitInput) => {
     const apartment: Apartment = {
       id: uid('a'),
@@ -413,6 +438,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       logLandlordUpdate,
       logActivity,
       addBuilding,
+      addLandlord,
       addUnit,
       updateUnit,
       deleteUnit,
@@ -433,6 +459,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       logLandlordUpdate,
       logActivity,
       addBuilding,
+      addLandlord,
       addUnit,
       updateUnit,
       deleteUnit,

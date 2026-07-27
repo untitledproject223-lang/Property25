@@ -7,6 +7,7 @@ export default defineConfig({
   optimizeDeps: {
     exclude: ['pdf-oxide-wasm'],
   },
+  assetsInclude: ['**/*.wasm'],
   build: {
     outDir: 'website',
     emptyOutDir: true,

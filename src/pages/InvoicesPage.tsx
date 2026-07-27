@@ -64,12 +64,12 @@ export default function InvoicesPage() {
     setNotes('')
   }
 
-  function downloadPdf() {
+  async function downloadPdf() {
     if (!selected || !selectedCtx) return
     setPdfError('')
     setPdfBusy(true)
     try {
-      generateInvoicePdf(selected, {
+      await generateInvoicePdf(selected, {
         tenantName: selectedCtx.tenant.name,
         tenantEmail: selectedCtx.tenant.email,
         tenantPhone: selectedCtx.tenant.phone,

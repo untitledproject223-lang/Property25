@@ -1,6 +1,18 @@
-import { WasmDocumentBuilder } from 'pdf-oxide-wasm/bundler'
+import init, { WasmDocumentBuilder } from 'pdf-oxide-wasm/web'
 import type { Invoice } from '../data/types'
 import { formatDate, formatMoney } from '../data/utils'
+
+/** Ensure WASM exports are loaded before constructing builders. */
+let pdfOxideReady: Promise<unknown> | null = null
+
+function ensurePdfOxide() {
+  if (!pdfOxideReady) {
+    // The /bundler entry does not wire WASM under Vite production builds.
+    // /web's init() fetches the .wasm (Vite rewrites the asset URL in the build).
+    pdfOxideReady = init()
+  }
+  return pdfOxideReady
+}
 
 export interface InvoicePdfContext {
   tenantName: string
@@ -80,7 +92,8 @@ function downloadBytes(bytes: Uint8Array, filename: string) {
 }
 
 /** Create and download a single-page modern PDF invoice using PDF Oxide DocumentBuilder. */
-export function generateInvoicePdf(invoice: Invoice, ctx: InvoicePdfContext) {
+export async function generateInvoicePdf(invoice: Invoice, ctx: InvoicePdfContext) {
+  await ensurePdfOxide()
   const invoiceNo = shortInvoiceNo(invoice.id)
   const builder = new WasmDocumentBuilder()
   builder.title(`Invoice ${invoiceNo}`)
