@@ -85,55 +85,59 @@ export default function UnitsPage() {
     setNewBuildingAddress('')
   }
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
     setError('')
-    let targetBuildingId = buildingId
-    if (newBuildingName.trim()) {
-      const building = addBuilding({
-        name: newBuildingName.trim(),
-        address: newBuildingAddress.trim() || 'Address TBD',
-      })
-      targetBuildingId = building.id
-    }
-    if (!targetBuildingId) {
-      setError('Select or create a building.')
-      return
-    }
-    if (!unitNumber.trim()) {
-      setError('Unit number is required.')
-      return
-    }
-    if (!landlordId) {
-      setError('Select a landlord.')
-      return
-    }
-    const rentValue = Number(rent)
-    const depositValue = Number(deposit)
-    if (!rentValue || rentValue < 0) {
-      setError('Enter a valid rent amount.')
-      return
-    }
+    try {
+      let targetBuildingId = buildingId
+      if (newBuildingName.trim()) {
+        const building = await addBuilding({
+          name: newBuildingName.trim(),
+          address: newBuildingAddress.trim() || 'Address TBD',
+        })
+        targetBuildingId = building.id
+      }
+      if (!targetBuildingId) {
+        setError('Select or create a building.')
+        return
+      }
+      if (!unitNumber.trim()) {
+        setError('Unit number is required.')
+        return
+      }
+      if (!landlordId) {
+        setError('Select a landlord.')
+        return
+      }
+      const rentValue = Number(rent)
+      const depositValue = Number(deposit)
+      if (!rentValue || rentValue < 0) {
+        setError('Enter a valid rent amount.')
+        return
+      }
 
-    if (mode === 'add') {
-      addUnit({
-        buildingId: targetBuildingId,
-        unitNumber: unitNumber.trim(),
-        rent: rentValue,
-        deposit: depositValue || rentValue * 2,
-        landlordId,
-        status: 'vacant',
-      })
-    } else if (mode === 'edit' && editingId) {
-      updateUnit(editingId, {
-        buildingId: targetBuildingId,
-        unitNumber: unitNumber.trim(),
-        rent: rentValue,
-        deposit: depositValue || rentValue * 2,
-        landlordId,
-      })
+      if (mode === 'add') {
+        await addUnit({
+          buildingId: targetBuildingId,
+          unitNumber: unitNumber.trim(),
+          rent: rentValue,
+          deposit: depositValue || rentValue * 2,
+          landlordId,
+          status: 'vacant',
+        })
+      } else if (mode === 'edit' && editingId) {
+        updateUnit(editingId, {
+          buildingId: targetBuildingId,
+          unitNumber: unitNumber.trim(),
+          rent: rentValue,
+          deposit: depositValue || rentValue * 2,
+          landlordId,
+        })
+      }
+      resetForm()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save unit')
     }
-    resetForm()
   }
 
   function handleDelete(id: string) {

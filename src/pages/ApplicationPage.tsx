@@ -33,7 +33,7 @@ export default function ApplicationPage() {
     setFormData((prev) => ({ ...prev, [key]: value }))
   }
 
-  function goNext() {
+  async function goNext() {
     const nextCompleted = new Set(completed).add(currentStage.id)
     setCompleted(nextCompleted)
 
@@ -41,19 +41,23 @@ export default function ApplicationPage() {
       if (!assignedTenantId) {
         const apartmentId = asString(formData.apartmentId)
         if (apartmentId) {
-          const tenant = completeApplication({
-            apartmentId,
-            name: asString(formData.applicantName),
-            email: asString(formData.applicantEmail),
-            phone: asString(formData.applicantPhone),
-            leaseStart:
-              asString(formData.moveInDate) || asString(formData.leaseStartDate),
-            leaseEnd:
-              asString(formData.termEndDate) || asString(formData.leaseEndDate),
-            agentName: asString(formData.agentName),
-            moveInSummary: asString(formData.inspectionNotes) || undefined,
-          })
-          if (tenant) setAssignedTenantId(tenant.id)
+          try {
+            const tenant = await completeApplication({
+              apartmentId,
+              name: asString(formData.applicantName),
+              email: asString(formData.applicantEmail),
+              phone: asString(formData.applicantPhone),
+              leaseStart:
+                asString(formData.moveInDate) || asString(formData.leaseStartDate),
+              leaseEnd:
+                asString(formData.termEndDate) || asString(formData.leaseEndDate),
+              agentName: asString(formData.agentName),
+              moveInSummary: asString(formData.inspectionNotes) || undefined,
+            })
+            if (tenant) setAssignedTenantId(tenant.id)
+          } catch {
+            // keep UI usable if API write fails
+          }
         }
       }
       return

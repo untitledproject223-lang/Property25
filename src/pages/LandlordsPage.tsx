@@ -43,7 +43,7 @@ export default function LandlordsPage() {
     setError('')
   }
 
-  function submitAdd(e: FormEvent) {
+  async function submitAdd(e: FormEvent) {
     e.preventDefault()
     setError('')
     if (!name.trim()) {
@@ -58,15 +58,19 @@ export default function LandlordsPage() {
       setError('Phone is required.')
       return
     }
-    const created = addLandlord({
-      name: name.trim(),
-      email: email.trim(),
-      phone: phone.trim(),
-      whatsapp: whatsapp.trim() || undefined,
-    })
-    setSelectedId(created.id)
-    setTenantId('')
-    resetAddForm()
+    try {
+      const created = await addLandlord({
+        name: name.trim(),
+        email: email.trim(),
+        phone: phone.trim(),
+        whatsapp: whatsapp.trim() || undefined,
+      })
+      setSelectedId(created.id)
+      setTenantId('')
+      resetAddForm()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not add landlord')
+    }
   }
 
   function submitUpdate(e: FormEvent) {

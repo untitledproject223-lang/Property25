@@ -83,29 +83,42 @@ Built by a team of 3. Suggested split:
 | Integrations / QA | Screening, Paystack, email, Mongo files, demos |
 ---
 ## Getting started
-> Application code is not scaffolded yet. This repo currently holds product docs and architecture.
-When the app lands:
+
+### Frontend (Vite)
+
 ```bash
-# clone
-git clone <repo-url>
-cd real-estate-system
-# install (example)
 npm install
-# configure env
-cp .env.example .env
-# set DATABASE_URL, MONGODB_URI, SCREENING_*, PAYSTACK_*, RESEND_*, MAX_UPLOAD_BYTES
-# run
 npm run dev
 ```
-### Expected environment variables
+
+### Backend API (Neon)
+
+```bash
+cd server
+cp .env.example .env
+# paste your Neon DATABASE_URL into server/.env
+
+npm install
+npm run db:setup
+npm run dev
+```
+
+From the repo root:
+
+```bash
+npm run dev:api    # API on :4000
+npm run db:setup   # migrate + seed Neon
+```
+
+Health check: `GET http://localhost:4000/api/health`  
+Full API docs: [server/README.md](server/README.md)
+
+### Server environment (`server/.env`)
+
 ```env
-DATABASE_URL=
-MONGODB_URI=
-SCREENING_API_KEY=
-SCREENING_API_BASE_URL=
-PAYSTACK_SECRET_KEY=
-RESEND_API_KEY=
-MAX_UPLOAD_BYTES=10485760
+DATABASE_URL=postgresql://...@...neon.tech/neondb?sslmode=require
+PORT=4000
+CORS_ORIGIN=http://localhost:5173
 ```
 ---
 ## License

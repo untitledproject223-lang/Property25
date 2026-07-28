@@ -2,10 +2,19 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from 'react'
+import {
+  createApartment,
+  createBuilding,
+  createLandlord,
+  createTenant,
+  fetchDashboard,
+} from './api'
+import { useAuth } from './AuthContext'
 import { seedData } from './seed'
 import type {
   ActivityLog,
@@ -34,6 +43,63 @@ function uid(prefix: string) {
 
 function nowIso() {
   return new Date().toISOString()
+}
+
+function emptyState(): DashboardState {
+  return {
+    buildings: [],
+    landlords: [],
+    apartments: [],
+    tenants: [],
+    payments: [],
+    invoices: [],
+    issues: [],
+    landlordUpdates: [],
+    activityLog: [],
+  }
+}
+
+function normalizeDashboard(raw: DashboardState): DashboardState {
+  return {
+    buildings: raw.buildings ?? [],
+    landlords: raw.landlords ?? [],
+    apartments: (raw.apartments ?? []).map((a) => ({
+      ...a,
+      rent: Number(a.rent),
+      deposit: Number(a.deposit),
+      nextDueDate: a.nextDueDate ? String(a.nextDueDate).slice(0, 10) : undefined,
+    })),
+    tenants: (raw.tenants ?? []).map((t) => ({
+      ...t,
+      balance: Number(t.balance),
+      leaseStart: String(t.leaseStart).slice(0, 10),
+      leaseEnd: String(t.leaseEnd).slice(0, 10),
+      docs: t.docs ?? undefined,
+      moveInInspection: t.moveInInspection ?? undefined,
+    })),
+    payments: (raw.payments ?? []).map((p) => ({
+      ...p,
+      amount: Number(p.amount),
+      date: String(p.date).slice(0, 10),
+    })),
+    invoices: (raw.invoices ?? []).map((inv) => ({
+      ...inv,
+      total: Number(inv.total),
+      issuedAt: String(inv.issuedAt).slice(0, 10),
+      dueDate: String(inv.dueDate).slice(0, 10),
+      items: inv.items ?? [],
+    })),
+    issues: (raw.issues ?? []).map((issue) => ({
+      ...issue,
+      createdAt: String(issue.createdAt),
+      messages: issue.messages ?? [],
+    })),
+    landlordUpdates: raw.landlordUpdates ?? [],
+    activityLog: (raw.activityLog ?? []).map((a) => ({
+      ...a,
+      at: String(a.at),
+    })),
+  }
 }
 
 interface CreateInvoiceInput {
@@ -91,6 +157,9 @@ export interface CompleteApplicationInput {
 
 interface DashboardContextValue {
   state: DashboardState
+  loading: boolean
+  error: string | null
+  refresh: () => Promise<void>
   createInvoice: (input: CreateInvoiceInput) => Invoice
   updateInvoiceStatus: (invoiceId: string, status: InvoiceStatus) => void
   addPayment: (input: AddPaymentInput) => Payment
@@ -109,12 +178,12 @@ interface DashboardContextValue {
     channel: ContactChannel
     body: string
   }) => void
-  addBuilding: (input: BuildingInput) => Building
-  addLandlord: (input: LandlordInput) => Landlord
-  addUnit: (input: UnitInput) => Apartment
+  addBuilding: (input: BuildingInput) => Promise<Building>
+  addLandlord: (input: LandlordInput) => Promise<Landlord>
+  addUnit: (input: UnitInput) => Promise<Apartment>
   updateUnit: (id: string, input: Partial<UnitInput>) => void
   deleteUnit: (id: string) => { ok: boolean; error?: string }
-  completeApplication: (input: CompleteApplicationInput) => Tenant | null
+  completeApplication: (input: CompleteApplicationInput) => Promise<Tenant | null>
   getBuilding: (id: string) => DashboardState['buildings'][0] | undefined
   getApartment: (id: string) => DashboardState['apartments'][0] | undefined
   getLandlord: (id: string) => DashboardState['landlords'][0] | undefined
@@ -130,7 +199,33 @@ interface DashboardContextValue {
 const DashboardContext = createContext<DashboardContextValue | null>(null)
 
 export function DashboardProvider({ children }: { children: ReactNode }) {
-  const [state, setState] = useState<DashboardState>(seedData)
+  const { user } = useAuth()
+  const [state, setState] = useState<DashboardState>(emptyState())
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    if (!user) {
+      setState(emptyState())
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await fetchDashboard()
+      setState(normalizeDashboard(result.data))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard')
+      // Fallback so the meeting demo still has something to show if API hiccups
+      setState(normalizeDashboard(seedData))
+    } finally {
+      setLoading(false)
+    }
+  }, [user])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
 
   const createInvoice = useCallback((input: CreateInvoiceInput) => {
     const total = input.items.reduce((sum, item) => sum + item.amount, 0)
@@ -272,49 +367,69 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     [],
   )
 
-  const addBuilding = useCallback((input: BuildingInput) => {
-    const building: Building = {
-      id: uid('b'),
-      name: input.name.trim(),
-      address: input.address.trim(),
-    }
-    setState((prev) => ({ ...prev, buildings: [...prev.buildings, building] }))
-    return building
-  }, [])
+  const addBuilding = useCallback(
+    async (input: BuildingInput) => {
+      const result = await createBuilding({
+        name: input.name.trim(),
+        address: input.address.trim(),
+      })
+      await refresh()
+      return {
+        id: String(result.data.id),
+        name: String(result.data.name),
+        address: String(result.data.address),
+      }
+    },
+    [refresh],
+  )
 
-  const addLandlord = useCallback((input: LandlordInput) => {
-    const phone = input.phone.trim()
-    const landlord: Landlord = {
-      id: uid('l'),
-      name: input.name.trim(),
-      email: input.email.trim(),
-      phone,
-      whatsapp: input.whatsapp?.trim() || phone.replace(/\D/g, '') || undefined,
-    }
-    setState((prev) => ({
-      ...prev,
-      landlords: [landlord, ...prev.landlords],
-    }))
-    return landlord
-  }, [])
+  const addLandlord = useCallback(
+    async (input: LandlordInput) => {
+      const phone = input.phone.trim()
+      const result = await createLandlord({
+        name: input.name.trim(),
+        email: input.email.trim(),
+        phone,
+        whatsapp: input.whatsapp?.trim() || phone.replace(/\D/g, '') || undefined,
+      })
+      await refresh()
+      return {
+        id: String(result.data.id),
+        name: String(result.data.name),
+        email: String(result.data.email),
+        phone: String(result.data.phone),
+        whatsapp: result.data.whatsapp ?? undefined,
+      }
+    },
+    [refresh],
+  )
 
-  const addUnit = useCallback((input: UnitInput) => {
-    const apartment: Apartment = {
-      id: uid('a'),
-      buildingId: input.buildingId,
-      unitNumber: input.unitNumber.trim(),
-      rent: input.rent,
-      deposit: input.deposit,
-      landlordId: input.landlordId,
-      status: input.status ?? 'vacant',
-      nextDueDate: input.nextDueDate,
-    }
-    setState((prev) => ({
-      ...prev,
-      apartments: [...prev.apartments, apartment],
-    }))
-    return apartment
-  }, [])
+  const addUnit = useCallback(
+    async (input: UnitInput) => {
+      const result = await createApartment({
+        buildingId: input.buildingId,
+        landlordId: input.landlordId,
+        unitNumber: input.unitNumber.trim(),
+        rent: input.rent,
+        deposit: input.deposit,
+        status: input.status ?? 'vacant',
+        nextDueDate: input.nextDueDate ?? null,
+      })
+      await refresh()
+      const row = result.data
+      return {
+        id: String(row.id),
+        buildingId: String(row.building_id ?? input.buildingId),
+        unitNumber: String(row.unit_number ?? input.unitNumber),
+        rent: Number(row.rent ?? input.rent),
+        deposit: Number(row.deposit ?? input.deposit),
+        landlordId: String(row.landlord_id ?? input.landlordId),
+        status: (row.status as Apartment['status']) ?? input.status ?? 'vacant',
+        nextDueDate: input.nextDueDate,
+      }
+    },
+    [refresh],
+  )
 
   const updateUnit = useCallback((id: string, input: Partial<UnitInput>) => {
     setState((prev) => ({
@@ -353,48 +468,47 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       : { ok: true }
   }, [])
 
-  const completeApplication = useCallback((input: CompleteApplicationInput): Tenant | null => {
-    const tenantId = uid('t')
-    const tenant: Tenant = {
-      id: tenantId,
-      apartmentId: input.apartmentId,
-      name: input.name.trim() || 'New tenant',
-      email: input.email.trim() || 'tenant@example.com',
-      phone: input.phone.trim() || '',
-      whatsapp: input.whatsapp,
-      leaseStart: input.leaseStart || nowIso().slice(0, 10),
-      leaseEnd: input.leaseEnd || nowIso().slice(0, 10),
-      status: 'active',
-      balance: 0,
-      moveInInspection: input.moveInSummary
-        ? {
-            date: nowIso().slice(0, 10),
-            agent: input.agentName || 'Agent',
-            summary: input.moveInSummary,
-          }
-        : undefined,
-    }
+  const completeApplication = useCallback(
+    async (input: CompleteApplicationInput): Promise<Tenant | null> => {
+      if (!isUnitVacant(input.apartmentId, state.tenants)) return null
+      const apartment = state.apartments.find((a) => a.id === input.apartmentId)
+      if (!apartment) return null
 
-    let ok = false
-    setState((prev) => {
-      const apartment = prev.apartments.find((a) => a.id === input.apartmentId)
-      if (!apartment || !isUnitVacant(input.apartmentId, prev.tenants)) {
-        return prev
-      }
-      ok = true
-      const nextDue = input.leaseStart || nowIso().slice(0, 10)
+      const result = await createTenant({
+        apartmentId: input.apartmentId,
+        name: input.name.trim() || 'New tenant',
+        email: input.email.trim() || 'tenant@example.com',
+        phone: input.phone.trim() || '',
+        whatsapp: input.whatsapp,
+        leaseStart: input.leaseStart || nowIso().slice(0, 10),
+        leaseEnd: input.leaseEnd || nowIso().slice(0, 10),
+        status: 'active',
+        balance: 0,
+      })
+      await refresh()
+      const row = result.data
       return {
-        ...prev,
-        tenants: [tenant, ...prev.tenants],
-        apartments: prev.apartments.map((a) =>
-          a.id === input.apartmentId
-            ? { ...a, status: 'occupied' as const, nextDueDate: nextDue }
-            : a,
-        ),
+        id: String(row.id),
+        apartmentId: String(row.apartment_id ?? input.apartmentId),
+        name: String(row.name),
+        email: String(row.email),
+        phone: String(row.phone),
+        whatsapp: (row.whatsapp as string | undefined) ?? undefined,
+        leaseStart: String(row.lease_start ?? input.leaseStart).slice(0, 10),
+        leaseEnd: String(row.lease_end ?? input.leaseEnd).slice(0, 10),
+        status: 'active',
+        balance: 0,
+        moveInInspection: input.moveInSummary
+          ? {
+              date: nowIso().slice(0, 10),
+              agent: input.agentName || 'Agent',
+              summary: input.moveInSummary,
+            }
+          : undefined,
       }
-    })
-    return ok ? tenant : null
-  }, [])
+    },
+    [refresh, state.apartments, state.tenants],
+  )
 
   const getBuilding = useCallback(
     (id: string) => state.buildings.find((b) => b.id === id),
@@ -430,6 +544,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       state,
+      loading,
+      error,
+      refresh,
       createInvoice,
       updateInvoiceStatus,
       addPayment,
@@ -451,6 +568,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
     }),
     [
       state,
+      loading,
+      error,
+      refresh,
       createInvoice,
       updateInvoiceStatus,
       addPayment,

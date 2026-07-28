@@ -5,9 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:api": "npm --prefix server run dev",
     "build": "tsc && vite build",
+    "build:api": "npm --prefix server run build",
     "preview": "vite preview",
-    "build:website": "tsc && vite build"
+    "build:website": "tsc && vite build",
+    "db:migrate": "npm --prefix server run db:migrate",
+    "db:seed": "npm --prefix server run db:seed",
+    "db:setup": "npm --prefix server run db:setup"
   },
   "dependencies": {
     "pdf-oxide-wasm": "^0.3.76",

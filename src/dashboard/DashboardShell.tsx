@@ -1,4 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import { useAuth } from '../data/AuthContext'
+import { useDashboard } from '../data/DashboardContext'
 import './DashboardShell.css'
 
 const NAV = [
@@ -13,13 +15,16 @@ const NAV = [
 ]
 
 export function DashboardShell() {
+  const { user, logout } = useAuth()
+  const { loading, error } = useDashboard()
+
   return (
     <div className="dash-shell">
       <aside className="dash-sidebar">
         <div className="dash-brand">
           <span className="brand-mark" aria-hidden="true" />
           <div>
-            <p className="brand-eyebrow">Real Estate CRM</p>
+            <p className="brand-eyebrow">Property25</p>
             <p className="dash-brand-title">Agent Desk</p>
           </div>
         </div>
@@ -41,8 +46,25 @@ export function DashboardShell() {
 
       <div className="dash-main">
         <header className="dash-topbar">
-          <p className="dash-topbar-label">Tenant management</p>
-          <p className="dash-topbar-agent">Signed in as Jane Agent</p>
+          <div>
+            <p className="dash-topbar-label">
+              {user?.org.name ?? 'Tenant management'}
+              {loading ? ' · syncing…' : ''}
+            </p>
+            {error ? (
+              <p className="dash-topbar-agent" style={{ color: '#b42318' }}>
+                API: {error} (showing fallback)
+              </p>
+            ) : null}
+          </div>
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
+            <p className="dash-topbar-agent">
+              {user?.name ?? 'Agent'} · {user?.role}
+            </p>
+            <button type="button" className="dash-nav-link" onClick={logout}>
+              Sign out
+            </button>
+          </div>
         </header>
         <div className="dash-content">
           <Outlet />
