@@ -102,10 +102,10 @@ export default function IssuesPage() {
               <form
                 className="form-stack"
                 style={{ marginTop: '1rem' }}
-                onSubmit={(e) => {
+                onSubmit={async (e) => {
                   e.preventDefault()
                   if (!reply.trim()) return
-                  replyToIssue(active.id, reply.trim())
+                  await replyToIssue(active.id, reply.trim())
                   setReply('')
                 }}
               >
@@ -124,7 +124,7 @@ export default function IssuesPage() {
                   <button
                     type="button"
                     className="btn btn-ghost btn-compact"
-                    onClick={() => setIssueStatus(active.id, 'resolved')}
+                    onClick={() => void setIssueStatus(active.id, 'resolved')}
                   >
                     Resolve
                   </button>
@@ -133,7 +133,7 @@ export default function IssuesPage() {
                     className="btn btn-ghost btn-compact"
                     onClick={() => {
                       const body = `Issue "${active.subject}" from ${ctx.tenant.name} (${ctx.building.name} Unit ${ctx.apartment.unitNumber}): ${active.messages.at(-1)?.body ?? ''}`
-                      logLandlordUpdate({
+                      void logLandlordUpdate({
                         landlordId: ctx.landlord.id,
                         tenantId: ctx.tenant.id,
                         body,

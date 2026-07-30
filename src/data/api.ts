@@ -113,6 +113,28 @@ export async function createApartment(input: {
   })
 }
 
+export async function updateApartment(
+  id: string,
+  input: Partial<{
+    buildingId: string
+    landlordId: string
+    unitNumber: string
+    rent: number
+    deposit: number
+    status: 'vacant' | 'occupied' | 'notice'
+    nextDueDate: string | null
+  }>,
+) {
+  return apiRequest<{ data: Record<string, unknown> }>(`/api/apartments/${id}`, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export async function deleteApartment(id: string) {
+  return apiRequest<{ data: { id: string } }>(`/api/apartments/${id}`, { method: 'DELETE' })
+}
+
 export async function createTenant(input: {
   apartmentId: string
   name: string
@@ -123,10 +145,143 @@ export async function createTenant(input: {
   leaseEnd: string
   status?: 'active' | 'notice' | 'former'
   balance?: number
+  moveInInspection?: {
+    date: string
+    agent: string
+    summary: string
+    meterElectric?: string
+    meterWater?: string
+  }
+  docs?: Record<string, string>
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/tenants', {
     method: 'POST',
     body: input,
+  })
+}
+
+export async function createInvoice(input: {
+  tenantId: string
+  dueDate: string
+  items: Array<{ type: string; description: string; amount: number }>
+  status?: string
+  notes?: string
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/invoices', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function patchInvoice(id: string, input: { status?: string; notes?: string }) {
+  return apiRequest<{ data: Record<string, unknown> }>(`/api/invoices/${id}`, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export async function createPayment(input: {
+  tenantId: string
+  date: string
+  type: string
+  amount: number
+  method: string
+  status?: string
+  proofName?: string
+  note?: string
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/payments', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function createIssue(input: {
+  tenantId: string
+  subject: string
+  severity?: string
+  audience?: string
+  message?: string
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/issues', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function patchIssue(
+  id: string,
+  input: {
+    status?: string
+    reply?: { author?: string; body: string }
+  },
+) {
+  return apiRequest<{ data: Record<string, unknown> }>(`/api/issues/${id}`, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export async function createActivity(input: {
+  tenantId?: string
+  landlordId?: string
+  kind: string
+  channel: string
+  body: string
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/activity', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function createApplication(input: {
+  apartmentId?: string | null
+  applicantName: string
+  applicantEmail: string
+  applicantPhone?: string
+  status?: string
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/applications', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function patchApplication(
+  id: string,
+  input: { status?: string; completenessPct?: number },
+) {
+  return apiRequest<{ data: Record<string, unknown> }>(`/api/applications/${id}`, {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export async function uploadDocument(input: {
+  applicationId?: string | null
+  tenantId?: string | null
+  docType: string
+  filename: string
+  mimeType: string
+  contentBase64: string
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/documents', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      const result = String(reader.result ?? '')
+      const base64 = result.includes(',') ? result.split(',')[1] : result
+      resolve(base64)
+    }
+    reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'))
+    reader.readAsDataURL(file)
   })
 }
 

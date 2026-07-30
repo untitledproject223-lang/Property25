@@ -126,7 +126,7 @@ export default function UnitsPage() {
           status: 'vacant',
         })
       } else if (mode === 'edit' && editingId) {
-        updateUnit(editingId, {
+        await updateUnit(editingId, {
           buildingId: targetBuildingId,
           unitNumber: unitNumber.trim(),
           rent: rentValue,
@@ -140,8 +140,8 @@ export default function UnitsPage() {
     }
   }
 
-  function handleDelete(id: string) {
-    const result = deleteUnit(id)
+  async function handleDelete(id: string) {
+    const result = await deleteUnit(id)
     if (!result.ok) {
       setError(result.error ?? 'Could not delete unit.')
     }

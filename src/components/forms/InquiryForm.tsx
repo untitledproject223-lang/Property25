@@ -2,6 +2,7 @@ import './forms.css'
 import { useDashboard } from '../../data/DashboardContext'
 import { vacantApartments } from '../../data/unitHelpers'
 import { formatMoney } from '../../data/utils'
+import { fileToBase64, uploadDocument } from '../../data/api'
 
 interface FormProps {
   data: Record<string, unknown>
@@ -14,6 +15,51 @@ function str(data: Record<string, unknown>, key: string) {
 
 function bool(data: Record<string, unknown>, key: string) {
   return data[key] === true
+}
+
+async function persistUpload(
+  data: Record<string, unknown>,
+  docType: string,
+  file: File,
+) {
+  const applicationId = str(data, 'applicationId') || null
+  const tenantId = str(data, 'tenantId') || null
+  if (!applicationId && !tenantId) {
+    throw new Error('Save applicant details first so documents can be stored.')
+  }
+  const contentBase64 = await fileToBase64(file)
+  await uploadDocument({
+    applicationId,
+    tenantId,
+    docType,
+    filename: file.name,
+    mimeType: file.type || 'application/octet-stream',
+    contentBase64,
+  })
+}
+
+function makeFileHandler(
+  data: Record<string, unknown>,
+  onChange: (key: string, value: unknown) => void,
+  fieldKey: string,
+  docType: string,
+) {
+  return async (name: string, file?: File) => {
+    onChange(fieldKey, name)
+    if (!file) return
+    try {
+      onChange(`${fieldKey}Uploading`, true)
+      onChange(`${fieldKey}Error`, '')
+      await persistUpload(data, docType, file)
+    } catch (err) {
+      onChange(
+        `${fieldKey}Error`,
+        err instanceof Error ? err.message : 'Upload failed',
+      )
+    } finally {
+      onChange(`${fieldKey}Uploading`, false)
+    }
+  }
 }
 
 function UnitSelectField({
@@ -111,13 +157,15 @@ function FileField({
   value,
   accept,
   onChange,
+  uploading,
 }: {
   id: string
   label: string
   hint?: string
   value: string
   accept?: string
-  onChange: (name: string) => void
+  onChange: (name: string, file?: File) => void
+  uploading?: boolean
 }) {
   return (
     <label className="field file-field" htmlFor={id}>
@@ -127,9 +175,13 @@ function FileField({
         id={id}
         type="file"
         accept={accept}
-        onChange={(e) => onChange(e.target.files?.[0]?.name ?? '')}
+        disabled={uploading}
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          onChange(file?.name ?? '', file)
+        }}
       />
-      {value ? <span className="file-selected">{value}</span> : null}
+      {value ? <span className="file-selected">{value}{uploading ? ' (uploading…)' : ''}</span> : null}
     </label>
   )
 }
@@ -469,36 +521,54 @@ export function DocumentsForm({ data, onChange }: FormProps) {
           label="1. ID documents"
           hint="Passport, driver's license, or national ID"
           value={str(data, 'idDocs')}
-          onChange={(name) => onChange('idDocs', name)}
+          uploading={bool(data, 'idDocsUploading')}
+          onChange={makeFileHandler(data, onChange, 'idDocs', 'idDoc')}
         />
         <FileField
           id="incomeDocs"
           label="2. Income documents"
           hint="Pay stubs, tax returns, or employment letter"
           value={str(data, 'incomeDocs')}
-          onChange={(name) => onChange('incomeDocs', name)}
+          uploading={bool(data, 'incomeDocsUploading')}
+          onChange={makeFileHandler(data, onChange, 'incomeDocs', 'incomeDoc')}
         />
         <FileField
           id="propertyDocs"
           label="3. Property documents"
           hint="Offer letter, listing sheet, or related property paperwork"
           value={str(data, 'propertyDocs')}
-          onChange={(name) => onChange('propertyDocs', name)}
+          uploading={bool(data, 'propertyDocsUploading')}
+          onChange={makeFileHandler(data, onChange, 'propertyDocs', 'propertyDoc')}
         />
         <FileField
           id="assetDocs"
           label="4. Assets / bank statements"
           hint="Recent bank or investment statements"
           value={str(data, 'assetDocs')}
-          onChange={(name) => onChange('assetDocs', name)}
+          uploading={bool(data, 'assetDocsUploading')}
+          onChange={makeFileHandler(data, onChange, 'assetDocs', 'assetDoc')}
         />
         <FileField
           id="creditDocs"
           label="5. Credit documents"
           hint="Credit authorization or existing report"
           value={str(data, 'creditDocs')}
-          onChange={(name) => onChange('creditDocs', name)}
+          uploading={bool(data, 'creditDocsUploading')}
+          onChange={makeFileHandler(data, onChange, 'creditDocs', 'creditDoc')}
         />
+        {str(data, 'idDocsError') ||
+        str(data, 'incomeDocsError') ||
+        str(data, 'propertyDocsError') ||
+        str(data, 'assetDocsError') ||
+        str(data, 'creditDocsError') ? (
+          <p className="field-hint" style={{ color: '#c0392b' }}>
+            {str(data, 'idDocsError') ||
+              str(data, 'incomeDocsError') ||
+              str(data, 'propertyDocsError') ||
+              str(data, 'assetDocsError') ||
+              str(data, 'creditDocsError')}
+          </p>
+        ) : null}
       </fieldset>
 
       <fieldset className="form-section">
@@ -638,7 +708,7 @@ export function KycForm({ data, onChange }: FormProps) {
           label="Attach KYC / credit report"
           accept=".pdf,image/*"
           value={str(data, 'kycReportFile')}
-          onChange={(name) => onChange('kycReportFile', name)}
+          onChange={makeFileHandler(data, onChange, 'kycReportFile', 'kycReportFile')}
         />
       </fieldset>
 
@@ -812,7 +882,7 @@ export function PaymentForm({ data, onChange }: FormProps) {
           hint="Bank receipt, screenshot, or PDF confirmation"
           accept=".pdf,image/*"
           value={str(data, 'proofOfPayment')}
-          onChange={(name) => onChange('proofOfPayment', name)}
+          onChange={makeFileHandler(data, onChange, 'proofOfPayment', 'proofOfPayment')}
         />
         <label className="check-field">
           <input
@@ -855,7 +925,7 @@ export function LeaseForm({ data, onChange }: FormProps) {
           hint="Upload the lease PDF to be signed"
           accept=".pdf,application/pdf"
           value={str(data, 'leasePdf')}
-          onChange={(name) => onChange('leasePdf', name)}
+          onChange={makeFileHandler(data, onChange, 'leasePdf', 'leasePdf')}
         />
         <label className="field">
           <span className="field-label">Lease start date</span>
@@ -1234,7 +1304,7 @@ export function MoveInForm({ data, onChange }: FormProps) {
           hint="Upload photos of rooms and any defects"
           accept="image/*,.pdf"
           value={str(data, 'inspectionPhotos')}
-          onChange={(name) => onChange('inspectionPhotos', name)}
+          onChange={makeFileHandler(data, onChange, 'inspectionPhotos', 'inspectionPhotos')}
         />
         <label className="field field-span">
           <span className="field-label">General comments</span>

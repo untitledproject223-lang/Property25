@@ -5,8 +5,8 @@ import './LoginPage.css'
 
 export default function LoginPage() {
   const { user, loading, login } = useAuth()
-  const [email, setEmail] = useState('admin@demo-agency.test')
-  const [password, setPassword] = useState('Demo1234!')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -30,7 +30,7 @@ export default function LoginPage() {
       <form className="login-card" onSubmit={onSubmit}>
         <p className="login-eyebrow">Property25</p>
         <h1>Agent sign in</h1>
-        <p className="login-sub">Demo agency connected to Neon</p>
+        <p className="login-sub">Sign in to manage your agency portfolio.</p>
 
         <label>
           Email
@@ -59,10 +59,6 @@ export default function LoginPage() {
         <button type="submit" disabled={submitting}>
           {submitting ? 'Signing in…' : 'Sign in'}
         </button>
-
-        <p className="login-hint">
-          Demo: admin@demo-agency.test / Demo1234!
-        </p>
       </form>
     </div>
   )

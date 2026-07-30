@@ -81,3 +81,70 @@ apartmentsRouter.get('/:id', async (req, res, next) => {
     next(err)
   }
 })
+
+const updateApartmentSchema = z.object({
+  buildingId: z.string().uuid().optional(),
+  landlordId: z.string().uuid().optional(),
+  unitNumber: z.string().min(1).max(40).optional(),
+  rent: z.number().positive().optional(),
+  deposit: z.number().nonnegative().optional(),
+  status: z.enum(['vacant', 'occupied', 'notice']).optional(),
+  nextDueDate: z.string().date().nullable().optional(),
+})
+
+apartmentsRouter.patch('/:id', async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const body = updateApartmentSchema.parse(req.body)
+
+    const existing = await sql`
+      SELECT * FROM apartments WHERE id = ${id} AND org_id = ${req.orgId!} LIMIT 1
+    `
+    if (existing.length === 0) throw new AppError(404, 'Apartment not found')
+
+    const buildingId = body.buildingId ?? existing[0].building_id
+    const landlordId = body.landlordId ?? existing[0].landlord_id
+
+    const rows = await sql`
+      UPDATE apartments
+      SET
+        building_id = ${buildingId},
+        landlord_id = ${landlordId},
+        unit_number = ${body.unitNumber ?? existing[0].unit_number},
+        rent = ${body.rent ?? existing[0].rent},
+        deposit = ${body.deposit ?? existing[0].deposit},
+        status = ${body.status ?? existing[0].status},
+        next_due_date = ${
+          body.nextDueDate !== undefined ? body.nextDueDate : existing[0].next_due_date
+        },
+        updated_at = now()
+      WHERE id = ${id} AND org_id = ${req.orgId!}
+      RETURNING id, building_id AS "buildingId", landlord_id AS "landlordId",
+        unit_number AS "unitNumber", rent::float8 AS rent, deposit::float8 AS deposit,
+        status, next_due_date AS "nextDueDate"
+    `
+    res.json({ data: rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+apartmentsRouter.delete('/:id', async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const linked = await sql`
+      SELECT id FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!} LIMIT 1
+    `
+    if (linked.length > 0) {
+      throw new AppError(400, 'Only vacant (unassigned) units can be deleted.')
+    }
+    const rows = await sql`
+      DELETE FROM apartments WHERE id = ${id} AND org_id = ${req.orgId!}
+      RETURNING id
+    `
+    if (rows.length === 0) throw new AppError(404, 'Apartment not found')
+    res.json({ data: { id: rows[0].id } })
+  } catch (err) {
+    next(err)
+  }
+})

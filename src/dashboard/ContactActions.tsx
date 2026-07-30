@@ -28,7 +28,7 @@ export function ContactActions({
   const cls = compact ? 'btn btn-ghost btn-compact' : 'btn btn-ghost'
 
   function track(channel: ContactChannel, body: string) {
-    logActivity({
+    void logActivity({
       tenantId,
       landlordId,
       kind: landlordId && !tenantId ? 'landlord_update' : 'contact',

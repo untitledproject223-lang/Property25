@@ -229,7 +229,7 @@ export default function TenantDetailPage() {
         <PaymentsTab
           payments={payments}
           onAdd={(payload) =>
-            addPayment({
+            void addPayment({
               tenantId: tenant.id,
               ...payload,
             })
@@ -242,8 +242,8 @@ export default function TenantDetailPage() {
           invoices={invoices}
           defaultRent={apartment.rent}
           defaultDeposit={apartment.deposit}
-          onCreate={(payload) => createInvoice({ tenantId: tenant.id, ...payload })}
-          onStatus={updateInvoiceStatus}
+          onCreate={(payload) => void createInvoice({ tenantId: tenant.id, ...payload })}
+          onStatus={(id, status) => void updateInvoiceStatus(id, status)}
         />
       )}
 
@@ -293,7 +293,7 @@ export default function TenantDetailPage() {
           onReply={replyToIssue}
           onStatus={setIssueStatus}
           onNotifyLandlord={(body) => {
-            logLandlordUpdate({
+            void logLandlordUpdate({
               landlordId: landlord.id,
               tenantId: tenant.id,
               body,
@@ -357,7 +357,7 @@ export default function TenantDetailPage() {
           tenantId={tenant.id}
           updates={landlordUpdates.filter((u) => u.landlordId === landlord.id)}
           onSend={(body, channel) => {
-            logLandlordUpdate({
+            void logLandlordUpdate({
               landlordId: landlord.id,
               tenantId: tenant.id,
               body,

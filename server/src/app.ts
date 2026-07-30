@@ -15,6 +15,11 @@ import { apartmentsRouter } from './routes/apartments.js'
 import { tenantsRouter } from './routes/tenants.js'
 import { applicationsRouter } from './routes/applications.js'
 import { dashboardRouter } from './routes/dashboard.js'
+import { invoicesRouter } from './routes/invoices.js'
+import { paymentsRouter } from './routes/payments.js'
+import { issuesRouter } from './routes/issues.js'
+import { activityRouter } from './routes/activity.js'
+import { documentsRouter } from './routes/documents.js'
 
 function isAllowedOrigin(origin: string): boolean {
   if (env.corsOrigins.includes(origin)) return true
@@ -45,7 +50,7 @@ export function createApp() {
     }),
   )
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'))
-  app.use(express.json({ limit: '2mb' }))
+  app.use(express.json({ limit: '8mb' }))
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
@@ -58,7 +63,7 @@ export function createApp() {
   app.get('/', (_req, res) => {
     res.json({
       name: 'Property25 API',
-      version: '1.0.0',
+      version: '1.1.0',
       docs: {
         health: 'GET /api/health',
         login: 'POST /api/auth/login',
@@ -77,6 +82,11 @@ export function createApp() {
   app.use('/api/apartments', apartmentsRouter)
   app.use('/api/tenants', tenantsRouter)
   app.use('/api/applications', applicationsRouter)
+  app.use('/api/invoices', invoicesRouter)
+  app.use('/api/payments', paymentsRouter)
+  app.use('/api/issues', issuesRouter)
+  app.use('/api/activity', activityRouter)
+  app.use('/api/documents', documentsRouter)
   app.use('/api/dashboard', dashboardRouter)
 
   app.use(notFound)

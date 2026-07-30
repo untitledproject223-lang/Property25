@@ -10,7 +10,7 @@ dashboardRouter.get('/', async (req, res, next) => {
   try {
     const orgId = req.orgId!
 
-    const [buildings, landlords, apartments, tenants, payments, invoices, issues, activityLog] =
+    const [buildings, landlords, apartments, tenants, payments, invoices, issues, activityLog, landlordUpdates] =
       await Promise.all([
         sql`SELECT id, name, address FROM buildings WHERE org_id = ${orgId} ORDER BY name`,
         sql`SELECT id, name, email, phone, whatsapp FROM landlords WHERE org_id = ${orgId} ORDER BY name`,
@@ -54,6 +54,13 @@ dashboardRouter.get('/', async (req, res, next) => {
           ORDER BY at DESC
           LIMIT 200
         `,
+        sql`
+          SELECT id, landlord_id AS "landlordId", tenant_id AS "tenantId",
+            body, channel, at
+          FROM landlord_updates WHERE org_id = ${orgId}
+          ORDER BY at DESC
+          LIMIT 200
+        `,
       ])
 
     res.json({
@@ -65,7 +72,7 @@ dashboardRouter.get('/', async (req, res, next) => {
         payments,
         invoices,
         issues,
-        landlordUpdates: [],
+        landlordUpdates,
         activityLog,
       },
     })

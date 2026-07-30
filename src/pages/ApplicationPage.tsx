@@ -5,10 +5,21 @@ import { STAGES } from '../stages'
 import { Timeline } from '../components/Timeline'
 import { StagePanel } from '../components/StagePanel'
 import { useDashboard } from '../data/DashboardContext'
+import { createApplication, patchApplication } from '../data/api'
 import '../App.css'
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : ''
+}
+
+const STAGE_STATUS: Record<StageId, string> = {
+  inquiry: 'in_progress',
+  documents: 'in_progress',
+  kyc: 'under_review',
+  payment: 'awaiting_signature',
+  lease: 'awaiting_signature',
+  completion: 'approved',
+  movein: 'tenant',
 }
 
 export default function ApplicationPage() {
@@ -18,6 +29,8 @@ export default function ApplicationPage() {
   const [completed, setCompleted] = useState<Set<StageId>>(new Set())
   const [formData, setFormData] = useState<Record<string, unknown>>({})
   const [assignedTenantId, setAssignedTenantId] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const currentStage = STAGES[currentIndex]
   const isLast = currentIndex === STAGES.length - 1
@@ -33,15 +46,48 @@ export default function ApplicationPage() {
     setFormData((prev) => ({ ...prev, [key]: value }))
   }
 
-  async function goNext() {
-    const nextCompleted = new Set(completed).add(currentStage.id)
-    setCompleted(nextCompleted)
+  async function ensureApplication(data: Record<string, unknown>) {
+    const existing = asString(data.applicationId)
+    if (existing) return existing
 
-    if (isLast) {
-      if (!assignedTenantId) {
-        const apartmentId = asString(formData.apartmentId)
-        if (apartmentId) {
-          try {
+    const name = asString(data.applicantName).trim()
+    const email = asString(data.applicantEmail).trim()
+    const phone = asString(data.applicantPhone).trim()
+    if (!name || !email) {
+      throw new Error('Applicant name and email are required before continuing.')
+    }
+
+    const apartmentId = asString(data.apartmentId) || null
+    const result = await createApplication({
+      apartmentId,
+      applicantName: name,
+      applicantEmail: email,
+      applicantPhone: phone || undefined,
+      status: 'in_progress',
+    })
+    const id = String(result.data.id)
+    setFormData((prev) => ({ ...prev, applicationId: id }))
+    return id
+  }
+
+  async function goNext() {
+    setError(null)
+    setSaving(true)
+    try {
+      const nextCompleted = new Set(completed).add(currentStage.id)
+      setCompleted(nextCompleted)
+
+      const applicationId = await ensureApplication(formData)
+      const completenessPct = Math.round(((currentIndex + 1) / STAGES.length) * 100)
+      await patchApplication(applicationId, {
+        status: STAGE_STATUS[currentStage.id] ?? 'in_progress',
+        completenessPct,
+      })
+
+      if (isLast) {
+        if (!assignedTenantId) {
+          const apartmentId = asString(formData.apartmentId)
+          if (apartmentId) {
             const tenant = await completeApplication({
               apartmentId,
               name: asString(formData.applicantName),
@@ -54,16 +100,25 @@ export default function ApplicationPage() {
               agentName: asString(formData.agentName),
               moveInSummary: asString(formData.inspectionNotes) || undefined,
             })
-            if (tenant) setAssignedTenantId(tenant.id)
-          } catch {
-            // keep UI usable if API write fails
+            if (tenant) {
+              setAssignedTenantId(tenant.id)
+              setFormData((prev) => ({ ...prev, tenantId: tenant.id }))
+              await patchApplication(applicationId, {
+                status: 'tenant',
+                completenessPct: 100,
+              })
+            }
           }
         }
+        return
       }
-      return
-    }
 
-    setCurrentIndex((i) => i + 1)
+      setCurrentIndex((i) => i + 1)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save application progress')
+    } finally {
+      setSaving(false)
+    }
   }
 
   function goToStage(index: number) {
@@ -77,6 +132,7 @@ export default function ApplicationPage() {
     setCurrentIndex(0)
     setFormData({})
     setAssignedTenantId(null)
+    setError(null)
   }
 
   return (
@@ -85,7 +141,7 @@ export default function ApplicationPage() {
         <div className="brand">
           <span className="brand-mark" aria-hidden="true" />
           <div>
-            <p className="brand-eyebrow">Real Estate CRM</p>
+            <p className="brand-eyebrow">Property25</p>
             <h1 className="brand-title">Tenant Application</h1>
           </div>
         </div>
@@ -99,6 +155,12 @@ export default function ApplicationPage() {
           </Link>
         </div>
       </header>
+
+      {error ? (
+        <p className="login-error" style={{ margin: '0 1.5rem 1rem' }}>
+          {error}
+        </p>
+      ) : null}
 
       <Timeline
         stages={STAGES}
@@ -133,17 +195,13 @@ export default function ApplicationPage() {
           </div>
         ) : null}
 
-        <StagePanel
-          stage={currentStage}
-          formData={formData}
-          onChange={updateField}
-        />
+        <StagePanel stage={currentStage} formData={formData} onChange={updateField} />
 
         <div className="stage-actions">
           <button
             type="button"
             className="btn btn-ghost"
-            disabled={currentIndex === 0}
+            disabled={currentIndex === 0 || saving}
             onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
           >
             Back
@@ -154,8 +212,13 @@ export default function ApplicationPage() {
               Start over
             </button>
           ) : (
-            <button type="button" className="btn btn-primary" onClick={goNext}>
-              {isLast ? 'Complete application' : 'Next'}
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={saving}
+              onClick={() => void goNext()}
+            >
+              {saving ? 'Saving…' : isLast ? 'Complete application' : 'Next'}
             </button>
           )}
         </div>

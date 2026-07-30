@@ -76,7 +76,7 @@ export default function LandlordsPage() {
   function submitUpdate(e: FormEvent) {
     e.preventDefault()
     if (!landlord || !body.trim()) return
-    logLandlordUpdate({
+    void logLandlordUpdate({
       landlordId: landlord.id,
       tenantId: tenantId || undefined,
       body: body.trim(),

@@ -32,7 +32,7 @@ export default function InvoicesPage() {
   const selectedCtx = selected ? tenantApartment(selected.tenantId) : null
   const composeCtx = tenantId ? tenantApartment(tenantId) : null
 
-  function submit(e: FormEvent) {
+  async function submit(e: FormEvent) {
     e.preventDefault()
     if (!composeCtx) return
     const items: InvoiceItem[] = []
@@ -53,7 +53,7 @@ export default function InvoicesPage() {
       push('admin', 'Admin fees', Number(adminAmount) || 0)
     }
     if (items.length === 0) return
-    const inv = createInvoice({
+    const inv = await createInvoice({
       tenantId: composeCtx.tenant.id,
       dueDate,
       items,
@@ -286,21 +286,21 @@ export default function InvoicesPage() {
                   <button
                     type="button"
                     className="btn btn-ghost btn-compact"
-                    onClick={() => updateInvoiceStatus(selected.id, 'sent')}
+                    onClick={() => void updateInvoiceStatus(selected.id, 'sent')}
                   >
                     Mark sent
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost btn-compact"
-                    onClick={() => updateInvoiceStatus(selected.id, 'paid')}
+                    onClick={() => void updateInvoiceStatus(selected.id, 'paid')}
                   >
                     Mark paid
                   </button>
                   <button
                     type="button"
                     className="btn btn-ghost btn-compact"
-                    onClick={() => updateInvoiceStatus(selected.id, 'overdue')}
+                    onClick={() => void updateInvoiceStatus(selected.id, 'overdue')}
                   >
                     Mark overdue
                   </button>
