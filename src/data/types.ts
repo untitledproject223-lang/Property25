@@ -4,7 +4,8 @@ export type PaymentType = 'rent' | 'deposit' | 'admin' | 'other'
 export type PaymentMethod = 'eft' | 'card' | 'cash'
 export type PaymentStatus = 'paid' | 'pending' | 'failed'
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue'
-export type InvoiceItemType = 'rent' | 'deposit' | 'admin' | 'other'
+export type InvoiceItemType = 'rent' | 'deposit' | 'admin' | 'maintenance' | 'other'
+export type InvoiceBillingKind = 'recurring' | 'one_time'
 export type IssueStatus = 'open' | 'pending' | 'resolved'
 export type IssueSeverity = 'low' | 'medium' | 'high'
 export type IssueAudience = 'agent' | 'landlord' | 'both'
@@ -89,6 +90,8 @@ export interface Invoice {
   total: number
   status: InvoiceStatus
   notes?: string
+  isRecurring?: boolean
+  billingKind?: InvoiceBillingKind
 }
 
 export interface IssueMessage {

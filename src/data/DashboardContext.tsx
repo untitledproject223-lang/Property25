@@ -29,6 +29,7 @@ import type {
   ContactChannel,
   DashboardState,
   Invoice,
+  InvoiceBillingKind,
   InvoiceItem,
   InvoiceStatus,
   IssueMessage,
@@ -90,6 +91,10 @@ function normalizeDashboard(raw: DashboardState): DashboardState {
       issuedAt: String(inv.issuedAt).slice(0, 10),
       dueDate: String(inv.dueDate).slice(0, 10),
       items: inv.items ?? [],
+      isRecurring: Boolean(inv.isRecurring ?? inv.billingKind === 'recurring'),
+      billingKind:
+        (inv.billingKind as InvoiceBillingKind | undefined) ??
+        (inv.isRecurring ? 'recurring' : 'one_time'),
     })),
     issues: (raw.issues ?? []).map((issue) => ({
       ...issue,
@@ -110,6 +115,8 @@ interface CreateInvoiceInput {
   items: InvoiceItem[]
   notes?: string
   status?: InvoiceStatus
+  billingKind?: InvoiceBillingKind
+  isRecurring?: boolean
 }
 
 interface AddPaymentInput {
@@ -230,12 +237,16 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const createInvoice = useCallback(
     async (input: CreateInvoiceInput) => {
+      const billingKind =
+        input.billingKind ?? (input.isRecurring ? 'recurring' : 'one_time')
       const result = await apiCreateInvoice({
         tenantId: input.tenantId,
         dueDate: input.dueDate,
         items: input.items,
         status: input.status ?? 'draft',
         notes: input.notes,
+        billingKind,
+        isRecurring: billingKind === 'recurring',
       })
       await refresh()
       const row = result.data
@@ -248,6 +259,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         total: Number(row.total ?? 0),
         status: (row.status as InvoiceStatus) ?? input.status ?? 'draft',
         notes: (row.notes as string | undefined) ?? input.notes,
+        isRecurring: Boolean(row.isRecurring ?? billingKind === 'recurring'),
+        billingKind:
+          (row.billingKind as InvoiceBillingKind | undefined) ?? billingKind,
       }
     },
     [refresh],

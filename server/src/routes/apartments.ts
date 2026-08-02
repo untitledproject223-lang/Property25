@@ -66,6 +66,178 @@ apartmentsRouter.post('/', async (req, res, next) => {
   }
 })
 
+apartmentsRouter.get('/:id/history', async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const apartments = await sql`
+      SELECT
+        a.id, a.building_id AS "buildingId", a.landlord_id AS "landlordId",
+        a.unit_number AS "unitNumber", a.rent::float8 AS rent, a.deposit::float8 AS deposit,
+        a.status, a.next_due_date AS "nextDueDate",
+        b.name AS "buildingName", b.address AS "buildingAddress",
+        l.name AS "landlordName", l.email AS "landlordEmail",
+        l.phone AS "landlordPhone", l.whatsapp AS "landlordWhatsapp"
+      FROM apartments a
+      JOIN buildings b ON b.id = a.building_id
+      JOIN landlords l ON l.id = a.landlord_id
+      WHERE a.id = ${id} AND a.org_id = ${req.orgId!}
+      LIMIT 1
+    `
+    if (apartments.length === 0) throw new AppError(404, 'Apartment not found')
+
+    const tenants = await sql`
+      SELECT
+        id, apartment_id AS "apartmentId", name, email, phone, whatsapp,
+        lease_start AS "leaseStart", lease_end AS "leaseEnd", status,
+        balance::float8 AS balance, docs_json AS docs,
+        move_in_inspection_json AS "moveInInspection",
+        created_at AS "createdAt"
+      FROM tenants
+      WHERE apartment_id = ${id} AND org_id = ${req.orgId!}
+      ORDER BY lease_start DESC NULLS LAST, created_at DESC
+    `
+
+    const applications = await sql`
+      SELECT
+        id, apartment_id AS "apartmentId", status,
+        applicant_name AS "applicantName",
+        applicant_email AS "applicantEmail",
+        applicant_phone AS "applicantPhone",
+        completeness_pct AS "completenessPct",
+        created_at AS "createdAt", updated_at AS "updatedAt"
+      FROM applications
+      WHERE org_id = ${req.orgId!}
+        AND (
+          apartment_id = ${id}
+          OR lower(applicant_email) IN (
+            SELECT lower(email) FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!}
+          )
+        )
+      ORDER BY created_at DESC
+    `
+
+    const invoices = await sql`
+      SELECT
+        i.id, i.tenant_id AS "tenantId", i.issued_at AS "issuedAt",
+        i.due_date AS "dueDate", i.items_json AS items, i.total::float8 AS total,
+        i.status, i.notes,
+        i.is_recurring AS "isRecurring", i.billing_kind AS "billingKind"
+      FROM invoices i
+      JOIN tenants t ON t.id = i.tenant_id
+      WHERE i.org_id = ${req.orgId!} AND t.apartment_id = ${id}
+      ORDER BY i.issued_at DESC
+    `
+
+    const payments = await sql`
+      SELECT
+        p.id, p.tenant_id AS "tenantId", p.paid_at AS date, p.type,
+        p.amount::float8 AS amount, p.method, p.status,
+        p.proof_name AS "proofName", p.note
+      FROM payments p
+      JOIN tenants t ON t.id = p.tenant_id
+      WHERE p.org_id = ${req.orgId!} AND t.apartment_id = ${id}
+      ORDER BY p.paid_at DESC
+    `
+
+    const issues = await sql`
+      SELECT
+        i.id, i.tenant_id AS "tenantId", i.subject, i.status, i.severity, i.audience,
+        i.messages_json AS messages, i.created_at AS "createdAt"
+      FROM issues i
+      JOIN tenants t ON t.id = i.tenant_id
+      WHERE i.org_id = ${req.orgId!} AND t.apartment_id = ${id}
+      ORDER BY i.created_at DESC
+    `
+
+    const documents = await sql`
+      SELECT
+        d.id, d.application_id AS "applicationId", d.tenant_id AS "tenantId",
+        d.doc_type AS "docType", d.filename, d.mime_type AS "mimeType",
+        d.size_bytes AS "sizeBytes", d.created_at AS "createdAt"
+      FROM documents d
+      LEFT JOIN tenants t ON t.id = d.tenant_id
+      LEFT JOIN applications a ON a.id = d.application_id
+      WHERE d.org_id = ${req.orgId!}
+        AND (
+          t.apartment_id = ${id}
+          OR a.apartment_id = ${id}
+          OR lower(a.applicant_email) IN (
+            SELECT lower(email) FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!}
+          )
+        )
+      ORDER BY d.created_at DESC
+    `
+
+    const screening = await sql`
+      SELECT
+        s.id, s.application_id AS "applicationId", s.enquiry_type AS "enquiryType",
+        s.status, s.provider_ref AS "providerRef", s.summary_json AS summary,
+        s.created_at AS "createdAt", s.updated_at AS "updatedAt"
+      FROM screening_requests s
+      JOIN applications a ON a.id = s.application_id
+      WHERE s.org_id = ${req.orgId!}
+        AND (
+          a.apartment_id = ${id}
+          OR lower(a.applicant_email) IN (
+            SELECT lower(email) FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!}
+          )
+        )
+      ORDER BY s.created_at DESC
+    `
+
+    const affordability = await sql`
+      SELECT
+        r.id, r.application_id AS "applicationId", r.band, r.score::float8 AS score,
+        r.rule_version AS "ruleVersion", r.reasons_json AS reasons,
+        r.override_note AS "overrideNote", r.created_at AS "createdAt"
+      FROM affordability_results r
+      JOIN applications a ON a.id = r.application_id
+      WHERE r.org_id = ${req.orgId!}
+        AND (
+          a.apartment_id = ${id}
+          OR lower(a.applicant_email) IN (
+            SELECT lower(email) FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!}
+          )
+        )
+      ORDER BY r.created_at DESC
+    `
+
+    const income = await sql`
+      SELECT
+        i.id, i.application_id AS "applicationId",
+        i.gross_salary::float8 AS "grossSalary",
+        i.target_rent::float8 AS "targetRent",
+        i.major_expenses_json AS "majorExpenses"
+      FROM application_income i
+      JOIN applications a ON a.id = i.application_id
+      WHERE i.org_id = ${req.orgId!}
+        AND (
+          a.apartment_id = ${id}
+          OR lower(a.applicant_email) IN (
+            SELECT lower(email) FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!}
+          )
+        )
+    `
+
+    res.json({
+      data: {
+        apartment: apartments[0],
+        tenants,
+        applications,
+        invoices,
+        payments,
+        issues,
+        documents,
+        screening,
+        affordability,
+        income,
+      },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
 apartmentsRouter.get('/:id', async (req, res, next) => {
   try {
     const id = z.string().uuid().parse(req.params.id)

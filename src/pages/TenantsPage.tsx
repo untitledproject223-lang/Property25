@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useDashboard } from '../data/DashboardContext'
 import { ContactActions } from '../dashboard/ContactActions'
+import { TenantDocsActions } from '../dashboard/TenantDocsActions'
 import { formatDate, formatMoney, paymentBadge } from '../data/utils'
 
 export default function TenantsPage() {
@@ -67,6 +68,7 @@ export default function TenantsPage() {
                 <th>Last payment</th>
                 <th>Issues</th>
                 <th>Contact</th>
+                <th>Documents</th>
               </tr>
             </thead>
             <tbody>
@@ -100,8 +102,10 @@ export default function TenantsPage() {
                       person={tenant}
                       tenantId={tenant.id}
                       subject={`Regarding ${building.name} Unit ${apartment.unitNumber}`}
-                      compact
                     />
+                  </td>
+                  <td>
+                    <TenantDocsActions tenantId={tenant.id} />
                   </td>
                 </tr>
               ))}

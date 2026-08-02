@@ -5,7 +5,11 @@ import { STAGES } from '../stages'
 import { Timeline } from '../components/Timeline'
 import { StagePanel } from '../components/StagePanel'
 import { useDashboard } from '../data/DashboardContext'
-import { createApplication, patchApplication } from '../data/api'
+import {
+  createApplication,
+  patchApplication,
+  saveApplicationScreening,
+} from '../data/api'
 import '../App.css'
 
 function asString(value: unknown) {
@@ -106,6 +110,49 @@ export default function ApplicationPage() {
               await patchApplication(applicationId, {
                 status: 'tenant',
                 completenessPct: 100,
+              })
+
+              const creditScore = Number(asString(formData.creditScore))
+              const grossSalary = Number(asString(formData.grossSalary || formData.incomeGross))
+              const targetRent = Number(asString(formData.targetRent || formData.rentAmount))
+              let band: 'green' | 'amber' | 'red' = 'amber'
+              const rec = asString(formData.creditRecommendation).toLowerCase()
+              if (rec.includes('decline') || rec.includes('reject') || asString(formData.kycStatus).toLowerCase() === 'fail') {
+                band = 'red'
+              } else if (
+                rec.includes('approve') ||
+                asString(formData.kycStatus).toLowerCase() === 'pass'
+              ) {
+                band = 'green'
+              }
+
+              await saveApplicationScreening(applicationId, {
+                enquiryType: 'kyc_credit',
+                status: 'completed',
+                providerRef: asString(formData.kycRef) || null,
+                summary: {
+                  kycStatus: asString(formData.kycStatus),
+                  kycIdType: asString(formData.kycIdType),
+                  kycDate: asString(formData.kycDate),
+                  kycSummary: asString(formData.kycSummary),
+                  creditScore: asString(formData.creditScore),
+                  creditPullDate: asString(formData.creditPullDate),
+                  creditRecommendation: asString(formData.creditRecommendation),
+                  agentApproval: asString(formData.agentApproval),
+                  landlordApproval: asString(formData.landlordApproval),
+                },
+                affordability: {
+                  band,
+                  score: Number.isFinite(creditScore) ? creditScore : null,
+                  reasons: [asString(formData.kycSummary)].filter(Boolean),
+                },
+                income: {
+                  grossSalary: Number.isFinite(grossSalary) ? grossSalary : null,
+                  targetRent: Number.isFinite(targetRent) ? targetRent : null,
+                },
+                linkTenantId: tenant.id,
+              }).catch(() => {
+                // Non-blocking: tenant creation already succeeded.
               })
             }
           }

@@ -8,7 +8,7 @@ export const invoicesRouter = Router()
 invoicesRouter.use(requireAuth)
 
 const itemSchema = z.object({
-  type: z.enum(['rent', 'deposit', 'admin', 'other']),
+  type: z.enum(['rent', 'deposit', 'admin', 'maintenance', 'other']),
   description: z.string().min(1).max(200),
   amount: z.number(),
 })
@@ -20,6 +20,8 @@ const createSchema = z.object({
   status: z.enum(['draft', 'sent', 'paid', 'overdue']).default('draft'),
   notes: z.string().max(2000).optional(),
   issuedAt: z.string().date().optional(),
+  billingKind: z.enum(['recurring', 'one_time']).default('one_time'),
+  isRecurring: z.boolean().optional(),
 })
 
 invoicesRouter.post('/', async (req, res, next) => {
@@ -32,15 +34,23 @@ invoicesRouter.post('/', async (req, res, next) => {
 
     const total = body.items.reduce((sum, item) => sum + item.amount, 0)
     const issuedAt = body.issuedAt ?? new Date().toISOString().slice(0, 10)
+    const billingKind =
+      body.billingKind ?? (body.isRecurring ? 'recurring' : 'one_time')
+    const isRecurring = body.isRecurring ?? billingKind === 'recurring'
 
     const rows = await sql`
-      INSERT INTO invoices (org_id, tenant_id, issued_at, due_date, items_json, total, status, notes)
+      INSERT INTO invoices (
+        org_id, tenant_id, issued_at, due_date, items_json, total, status, notes,
+        is_recurring, billing_kind
+      )
       VALUES (
         ${req.orgId!}, ${body.tenantId}, ${issuedAt}, ${body.dueDate},
-        ${JSON.stringify(body.items)}::jsonb, ${total}, ${body.status}, ${body.notes ?? null}
+        ${JSON.stringify(body.items)}::jsonb, ${total}, ${body.status}, ${body.notes ?? null},
+        ${isRecurring}, ${billingKind}
       )
       RETURNING id, tenant_id AS "tenantId", issued_at AS "issuedAt", due_date AS "dueDate",
-        items_json AS items, total::float8 AS total, status, notes
+        items_json AS items, total::float8 AS total, status, notes,
+        is_recurring AS "isRecurring", billing_kind AS "billingKind"
     `
     res.status(201).json({ data: rows[0] })
   } catch (err) {
@@ -66,7 +76,8 @@ invoicesRouter.patch('/:id', async (req, res, next) => {
         updated_at = now()
       WHERE id = ${id} AND org_id = ${req.orgId!}
       RETURNING id, tenant_id AS "tenantId", issued_at AS "issuedAt", due_date AS "dueDate",
-        items_json AS items, total::float8 AS total, status, notes
+        items_json AS items, total::float8 AS total, status, notes,
+        is_recurring AS "isRecurring", billing_kind AS "billingKind"
     `
     if (rows.length === 0) throw new AppError(404, 'Invoice not found')
     res.json({ data: rows[0] })

@@ -7,6 +7,85 @@ import { AppError } from '../middleware/error.js'
 export const documentsRouter = Router()
 documentsRouter.use(requireAuth)
 
+documentsRouter.get('/', async (req, res, next) => {
+  try {
+    const tenantId = typeof req.query.tenantId === 'string' ? req.query.tenantId : undefined
+    const applicationId =
+      typeof req.query.applicationId === 'string' ? req.query.applicationId : undefined
+    const apartmentId =
+      typeof req.query.apartmentId === 'string' ? req.query.apartmentId : undefined
+
+    if (tenantId) z.string().uuid().parse(tenantId)
+    if (applicationId) z.string().uuid().parse(applicationId)
+    if (apartmentId) z.string().uuid().parse(apartmentId)
+
+    if (!tenantId && !applicationId && !apartmentId) {
+      throw new AppError(400, 'tenantId, applicationId, or apartmentId is required')
+    }
+
+    let rows
+    if (tenantId) {
+      rows = await sql`
+        SELECT
+          d.id, d.application_id AS "applicationId", d.tenant_id AS "tenantId",
+          d.doc_type AS "docType", d.filename, d.mime_type AS "mimeType",
+          d.size_bytes AS "sizeBytes", d.created_at AS "createdAt"
+        FROM documents d
+        WHERE d.org_id = ${req.orgId!} AND d.tenant_id = ${tenantId}
+        ORDER BY d.created_at DESC
+      `
+      // Also include application docs matched by the tenant's email / apartment apps
+      const linked = await sql`
+        SELECT
+          d.id, d.application_id AS "applicationId", d.tenant_id AS "tenantId",
+          d.doc_type AS "docType", d.filename, d.mime_type AS "mimeType",
+          d.size_bytes AS "sizeBytes", d.created_at AS "createdAt"
+        FROM documents d
+        JOIN applications a ON a.id = d.application_id
+        JOIN tenants t ON t.id = ${tenantId} AND t.org_id = ${req.orgId!}
+        WHERE d.org_id = ${req.orgId!}
+          AND d.tenant_id IS NULL
+          AND (
+            a.apartment_id = t.apartment_id
+            OR lower(a.applicant_email) = lower(t.email)
+          )
+        ORDER BY d.created_at DESC
+      `
+      const seen = new Set(rows.map((r) => r.id as string))
+      for (const row of linked) {
+        if (!seen.has(row.id as string)) rows.push(row)
+      }
+    } else if (applicationId) {
+      rows = await sql`
+        SELECT
+          d.id, d.application_id AS "applicationId", d.tenant_id AS "tenantId",
+          d.doc_type AS "docType", d.filename, d.mime_type AS "mimeType",
+          d.size_bytes AS "sizeBytes", d.created_at AS "createdAt"
+        FROM documents d
+        WHERE d.org_id = ${req.orgId!} AND d.application_id = ${applicationId}
+        ORDER BY d.created_at DESC
+      `
+    } else {
+      rows = await sql`
+        SELECT
+          d.id, d.application_id AS "applicationId", d.tenant_id AS "tenantId",
+          d.doc_type AS "docType", d.filename, d.mime_type AS "mimeType",
+          d.size_bytes AS "sizeBytes", d.created_at AS "createdAt"
+        FROM documents d
+        LEFT JOIN tenants t ON t.id = d.tenant_id
+        LEFT JOIN applications a ON a.id = d.application_id
+        WHERE d.org_id = ${req.orgId!}
+          AND (t.apartment_id = ${apartmentId!} OR a.apartment_id = ${apartmentId!})
+        ORDER BY d.created_at DESC
+      `
+    }
+
+    res.json({ data: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
 const uploadSchema = z.object({
   applicationId: z.string().uuid().optional().nullable(),
   tenantId: z.string().uuid().optional().nullable(),

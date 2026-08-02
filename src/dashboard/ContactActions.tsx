@@ -14,6 +14,7 @@ interface ContactActionsProps {
   tenantId?: string
   landlordId?: string
   subject?: string
+  /** Kept for compatibility; contact actions are always compact. */
   compact?: boolean
 }
 
@@ -22,10 +23,8 @@ export function ContactActions({
   tenantId,
   landlordId,
   subject,
-  compact,
 }: ContactActionsProps) {
   const { logActivity } = useDashboard()
-  const cls = compact ? 'btn btn-ghost btn-compact' : 'btn btn-ghost'
 
   function track(channel: ContactChannel, body: string) {
     void logActivity({
@@ -38,26 +37,29 @@ export function ContactActions({
   }
 
   return (
-    <div className="btn-row">
+    <div className="contact-actions" role="group" aria-label={`Contact ${person.name}`}>
       <a
-        className={cls}
+        className="btn-contact"
         href={mailto(person.email, subject)}
+        title={`Email ${person.name}`}
         onClick={() => track('email', `Emailed ${person.name}`)}
       >
         Email
       </a>
       <a
-        className={cls}
+        className="btn-contact"
         href={whatsappLink(person.whatsapp || person.phone, subject)}
         target="_blank"
         rel="noreferrer"
+        title={`WhatsApp ${person.name}`}
         onClick={() => track('whatsapp', `WhatsApp ${person.name}`)}
       >
-        WhatsApp
+        WA
       </a>
       <a
-        className={cls}
+        className="btn-contact"
         href={telLink(person.phone)}
+        title={`Call ${person.name}`}
         onClick={() => track('phone', `Called ${person.name}`)}
       >
         Call

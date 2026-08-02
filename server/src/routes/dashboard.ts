@@ -37,7 +37,8 @@ dashboardRouter.get('/', async (req, res, next) => {
         `,
         sql`
           SELECT id, tenant_id AS "tenantId", issued_at AS "issuedAt", due_date AS "dueDate",
-            items_json AS items, total::float8 AS total, status, notes
+            items_json AS items, total::float8 AS total, status, notes,
+            is_recurring AS "isRecurring", billing_kind AS "billingKind"
           FROM invoices WHERE org_id = ${orgId}
           ORDER BY issued_at DESC
         `,

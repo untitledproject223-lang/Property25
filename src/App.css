@@ -136,7 +136,7 @@
     flex-direction: column-reverse;
   }
 
-  .btn {
+  .btn:not(.btn-contact):not(.btn-compact) {
     width: 100%;
   }
 }

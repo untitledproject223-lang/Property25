@@ -166,6 +166,8 @@ export async function createInvoice(input: {
   items: Array<{ type: string; description: string; amount: number }>
   status?: string
   notes?: string
+  billingKind?: 'recurring' | 'one_time'
+  isRecurring?: boolean
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/invoices', {
     method: 'POST',
@@ -258,6 +260,17 @@ export async function patchApplication(
   })
 }
 
+export type DocumentMeta = {
+  id: string
+  applicationId?: string | null
+  tenantId?: string | null
+  docType: string
+  filename: string
+  mimeType: string
+  sizeBytes: number
+  createdAt?: string
+}
+
 export async function uploadDocument(input: {
   applicationId?: string | null
   tenantId?: string | null
@@ -270,6 +283,103 @@ export async function uploadDocument(input: {
     method: 'POST',
     body: input,
   })
+}
+
+export async function listDocuments(params: {
+  tenantId?: string
+  applicationId?: string
+  apartmentId?: string
+}) {
+  const qs = new URLSearchParams()
+  if (params.tenantId) qs.set('tenantId', params.tenantId)
+  if (params.applicationId) qs.set('applicationId', params.applicationId)
+  if (params.apartmentId) qs.set('apartmentId', params.apartmentId)
+  return apiRequest<{ data: DocumentMeta[] }>(`/api/documents?${qs.toString()}`)
+}
+
+export async function fetchDocument(id: string) {
+  return apiRequest<{
+    data: {
+      id: string
+      filename: string
+      mimeType: string
+      contentBase64: string
+      sizeBytes: number
+    }
+  }>(`/api/documents/${id}`)
+}
+
+export async function downloadDocument(id: string) {
+  const { data } = await fetchDocument(id)
+  const binary = atob(data.contentBase64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  const blob = new Blob([bytes], { type: data.mimeType || 'application/octet-stream' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = data.filename || 'document'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export async function fetchApartmentHistory(apartmentId: string) {
+  return apiRequest<{ data: ApartmentHistory }>(`/api/apartments/${apartmentId}/history`)
+}
+
+export type ApartmentHistory = {
+  apartment: {
+    id: string
+    buildingId: string
+    landlordId: string
+    unitNumber: string
+    rent: number
+    deposit: number
+    status: string
+    nextDueDate?: string | null
+    buildingName: string
+    buildingAddress: string
+    landlordName: string
+    landlordEmail: string
+    landlordPhone: string
+    landlordWhatsapp?: string | null
+  }
+  tenants: Array<Record<string, unknown>>
+  applications: Array<Record<string, unknown>>
+  invoices: Array<Record<string, unknown>>
+  payments: Array<Record<string, unknown>>
+  issues: Array<Record<string, unknown>>
+  documents: DocumentMeta[]
+  screening: Array<Record<string, unknown>>
+  affordability: Array<Record<string, unknown>>
+  income: Array<Record<string, unknown>>
+}
+
+export async function saveApplicationScreening(
+  applicationId: string,
+  input: {
+    enquiryType?: string
+    status?: 'pending' | 'processing' | 'completed' | 'failed'
+    providerRef?: string | null
+    summary?: Record<string, unknown>
+    affordability?: {
+      band: 'green' | 'amber' | 'red'
+      score?: number | null
+      reasons?: unknown[]
+      overrideNote?: string | null
+    }
+    income?: {
+      grossSalary?: number | null
+      targetRent?: number | null
+      majorExpenses?: unknown[]
+    }
+    linkTenantId?: string | null
+  },
+) {
+  return apiRequest<{ data: Record<string, unknown> }>(
+    `/api/applications/${applicationId}/screening`,
+    { method: 'POST', body: input },
+  )
 }
 
 export function fileToBase64(file: File): Promise<string> {

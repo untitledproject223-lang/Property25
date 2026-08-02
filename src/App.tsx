@@ -10,6 +10,7 @@ import InvoicesPage from './pages/InvoicesPage'
 import IssuesPage from './pages/IssuesPage'
 import LandlordsPage from './pages/LandlordsPage'
 import UnitsPage from './pages/UnitsPage'
+import UnitDetailPage from './pages/UnitDetailPage'
 import ApplicationPage from './pages/ApplicationPage'
 import LoginPage from './pages/LoginPage'
 import './App.css'
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="tenants" element={<TenantsPage />} />
               <Route path="tenants/:id" element={<TenantDetailPage />} />
               <Route path="units" element={<UnitsPage />} />
+              <Route path="units/:id" element={<UnitDetailPage />} />
               <Route path="payments" element={<PaymentsPage />} />
               <Route path="invoices" element={<InvoicesPage />} />
               <Route path="issues" element={<IssuesPage />} />

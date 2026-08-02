@@ -1,17 +1,15 @@
-import { useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react'
+import { Link, useNavigate } from 'react-router-dom'
 import { useDashboard } from '../data/DashboardContext'
 import { isUnitVacant } from '../data/unitHelpers'
 import { formatMoney, formatDate } from '../data/utils'
 import './TenantDetail.css'
 
-type FormMode = 'closed' | 'add' | 'edit'
-
 export default function UnitsPage() {
-  const { state, addUnit, updateUnit, deleteUnit, addBuilding } = useDashboard()
+  const navigate = useNavigate()
+  const { state, addUnit, addBuilding } = useDashboard()
   const [query, setQuery] = useState('')
-  const [mode, setMode] = useState<FormMode>('closed')
-  const [editingId, setEditingId] = useState<string | null>(null)
+  const [showAdd, setShowAdd] = useState(false)
   const [error, setError] = useState('')
 
   const [buildingId, setBuildingId] = useState(state.buildings[0]?.id ?? '')
@@ -53,8 +51,7 @@ export default function UnitsPage() {
   }, [state, query])
 
   function resetForm() {
-    setMode('closed')
-    setEditingId(null)
+    setShowAdd(false)
     setError('')
     setUnitNumber('')
     setRent('')
@@ -63,26 +60,6 @@ export default function UnitsPage() {
     setNewBuildingAddress('')
     setBuildingId(state.buildings[0]?.id ?? '')
     setLandlordId(state.landlords[0]?.id ?? '')
-  }
-
-  function openAdd() {
-    resetForm()
-    setMode('add')
-  }
-
-  function openEdit(id: string) {
-    const apartment = state.apartments.find((a) => a.id === id)
-    if (!apartment) return
-    setMode('edit')
-    setEditingId(id)
-    setError('')
-    setBuildingId(apartment.buildingId)
-    setUnitNumber(apartment.unitNumber)
-    setRent(String(apartment.rent))
-    setDeposit(String(apartment.deposit))
-    setLandlordId(apartment.landlordId)
-    setNewBuildingName('')
-    setNewBuildingAddress('')
   }
 
   async function submit(e: FormEvent) {
@@ -116,34 +93,29 @@ export default function UnitsPage() {
         return
       }
 
-      if (mode === 'add') {
-        await addUnit({
-          buildingId: targetBuildingId,
-          unitNumber: unitNumber.trim(),
-          rent: rentValue,
-          deposit: depositValue || rentValue * 2,
-          landlordId,
-          status: 'vacant',
-        })
-      } else if (mode === 'edit' && editingId) {
-        await updateUnit(editingId, {
-          buildingId: targetBuildingId,
-          unitNumber: unitNumber.trim(),
-          rent: rentValue,
-          deposit: depositValue || rentValue * 2,
-          landlordId,
-        })
-      }
+      const created = await addUnit({
+        buildingId: targetBuildingId,
+        unitNumber: unitNumber.trim(),
+        rent: rentValue,
+        deposit: depositValue || rentValue * 2,
+        landlordId,
+        status: 'vacant',
+      })
       resetForm()
+      navigate(`/units/${created.id}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save unit')
     }
   }
 
-  async function handleDelete(id: string) {
-    const result = await deleteUnit(id)
-    if (!result.ok) {
-      setError(result.error ?? 'Could not delete unit.')
+  function openUnit(id: string) {
+    navigate(`/units/${id}`)
+  }
+
+  function onRowKeyDown(e: KeyboardEvent, id: string) {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      openUnit(id)
     }
   }
 
@@ -153,11 +125,18 @@ export default function UnitsPage() {
         <div>
           <h1>Units</h1>
           <p>
-            All rental units you have onboarded. Vacant units are available for new
-            tenant applications.
+            All rental units you have onboarded. Click a row for full history, documents,
+            and screening data.
           </p>
         </div>
-        <button type="button" className="btn btn-primary btn-compact" onClick={openAdd}>
+        <button
+          type="button"
+          className="btn btn-primary btn-compact"
+          onClick={() => {
+            resetForm()
+            setShowAdd(true)
+          }}
+        >
           Add unit
         </button>
       </div>
@@ -178,10 +157,10 @@ export default function UnitsPage() {
         </p>
       ) : null}
 
-      {mode !== 'closed' ? (
+      {showAdd ? (
         <div className="panel" style={{ marginBottom: '1rem' }}>
           <div className="panel-header">
-            <h2>{mode === 'add' ? 'Add unit' : 'Edit unit'}</h2>
+            <h2>Add unit</h2>
             <button type="button" className="btn btn-ghost btn-compact" onClick={resetForm}>
               Cancel
             </button>
@@ -267,7 +246,7 @@ export default function UnitsPage() {
               </select>
             </label>
             <button type="submit" className="btn btn-primary btn-compact">
-              {mode === 'add' ? 'Save unit' : 'Update unit'}
+              Save unit
             </button>
           </form>
         </div>
@@ -285,12 +264,17 @@ export default function UnitsPage() {
                 <th>Landlord</th>
                 <th>Tenant</th>
                 <th>Status</th>
-                <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map(({ apartment, building, landlord, tenant, vacant }) => (
-                <tr key={apartment.id}>
+                <tr
+                  key={apartment.id}
+                  className="clickable-row"
+                  tabIndex={0}
+                  onClick={() => openUnit(apartment.id)}
+                  onKeyDown={(e) => onRowKeyDown(e, apartment.id)}
+                >
                   <td>
                     <strong>Unit {apartment.unitNumber}</strong>
                   </td>
@@ -305,7 +289,11 @@ export default function UnitsPage() {
                   <td>{landlord?.name ?? '—'}</td>
                   <td>
                     {tenant ? (
-                      <Link className="link-quiet" to={`/tenants/${tenant.id}`}>
+                      <Link
+                        className="link-quiet"
+                        to={`/tenants/${tenant.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {tenant.name}
                       </Link>
                     ) : (
@@ -321,30 +309,6 @@ export default function UnitsPage() {
                         Due {formatDate(apartment.nextDueDate)}
                       </div>
                     ) : null}
-                  </td>
-                  <td>
-                    <div className="btn-row">
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-compact"
-                        onClick={() => openEdit(apartment.id)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-compact"
-                        disabled={!vacant}
-                        title={
-                          vacant
-                            ? 'Delete unit'
-                            : 'Occupied units cannot be deleted'
-                        }
-                        onClick={() => handleDelete(apartment.id)}
-                      >
-                        Delete
-                      </button>
-                    </div>
                   </td>
                 </tr>
               ))}
