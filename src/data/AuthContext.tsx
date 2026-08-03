@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from 'react'
 import {
+  acceptInvite as apiAcceptInvite,
   fetchMe,
   getToken,
   login as apiLogin,
@@ -20,7 +21,13 @@ type AuthState = {
   loading: boolean
   error: string | null
   login: (email: string, password: string) => Promise<void>
+  acceptInvite: (input: {
+    token: string
+    fullName: string
+    password: string
+  }) => Promise<void>
   logout: () => void
+  setUser: (user: AuthUser | null) => void
 }
 
 const AuthContext = createContext<AuthState | null>(null)
@@ -59,14 +66,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user)
   }, [])
 
+  const acceptInvite = useCallback(
+    async (input: { token: string; fullName: string; password: string }) => {
+      setError(null)
+      const result = await apiAcceptInvite(input)
+      setUser(result.user)
+    },
+    [],
+  )
+
   const logout = useCallback(() => {
     setToken(null)
     setUser(null)
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, error, login, logout }),
-    [user, loading, error, login, logout],
+    () => ({ user, loading, error, login, acceptInvite, logout, setUser }),
+    [user, loading, error, login, acceptInvite, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

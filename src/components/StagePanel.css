@@ -74,6 +74,77 @@
   line-height: 1.55;
 }
 
+.stage-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-inline-size: 0;
+}
+
+.stage-view-only {
+  opacity: 0.92;
+}
+
+.stage-waiting .stage-panel-header {
+  background: #fef3f2;
+  border-bottom-color: #fecdca;
+}
+
+.stage-waiting {
+  border-color: #f04438;
+  box-shadow: 0 0 0 1px rgba(240, 68, 56, 0.12);
+}
+
+.stage-body-waiting {
+  opacity: 0.55;
+  filter: grayscale(0.35);
+  pointer-events: none;
+}
+
+.stage-waiting-banner,
+.stage-partial-banner {
+  margin-top: 0.85rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.25rem;
+}
+
+.stage-waiting-banner {
+  background: #fef3f2;
+  border: 1px solid #fecdca;
+  color: #912018;
+}
+
+.stage-partial-banner {
+  background: #fffaeb;
+  border: 1px solid #fedf89;
+  color: #7a2e0e;
+}
+
+.stage-waiting-banner strong,
+.stage-partial-banner strong {
+  font-size: 0.95rem;
+}
+
+.stage-waiting-banner span,
+.stage-partial-banner span {
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+.role-badge.role-waiting {
+  background: #fef3f2;
+  border-color: #f04438;
+  color: #b42318;
+}
+
+.role-badge.role-action {
+  background: #ecfdf3;
+  border-color: #12b76a;
+  color: #027a48;
+}
+
 .stage-optional {
   margin-top: 0.7rem;
   font-size: 0.86rem;

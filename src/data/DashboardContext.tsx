@@ -218,6 +218,13 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
       setState(emptyState())
       return
     }
+    // Agent desk data only — tenant/landlord portals use /api/portal
+    if (user.role !== 'admin' && user.role !== 'agent') {
+      setState(emptyState())
+      setLoading(false)
+      setError(null)
+      return
+    }
     setLoading(true)
     setError(null)
     try {

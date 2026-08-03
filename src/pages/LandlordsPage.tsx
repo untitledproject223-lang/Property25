@@ -2,6 +2,7 @@ import { useMemo, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { useDashboard } from '../data/DashboardContext'
 import { ContactActions } from '../dashboard/ContactActions'
+import { createInvite } from '../data/api'
 import { formatDateTime, mailto } from '../data/utils'
 import './TenantDetail.css'
 
@@ -16,6 +17,7 @@ export default function LandlordsPage() {
   const [phone, setPhone] = useState('')
   const [whatsapp, setWhatsapp] = useState('')
   const [error, setError] = useState('')
+  const [inviteUrl, setInviteUrl] = useState<string | null>(null)
 
   const landlord = state.landlords.find((l) => l.id === selectedId) ?? state.landlords[0]
 
@@ -67,9 +69,34 @@ export default function LandlordsPage() {
       })
       setSelectedId(created.id)
       setTenantId('')
+      try {
+        const invite = await createInvite({
+          email: email.trim(),
+          role: 'landlord',
+          landlordId: created.id,
+        })
+        setInviteUrl(invite.data.inviteUrl)
+      } catch {
+        // Landlord created even if invite fails
+      }
       resetAddForm()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add landlord')
+    }
+  }
+
+  async function inviteSelectedLandlord() {
+    if (!landlord) return
+    setError('')
+    try {
+      const invite = await createInvite({
+        email: landlord.email,
+        role: 'landlord',
+        landlordId: landlord.id,
+      })
+      setInviteUrl(invite.data.inviteUrl)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create invite')
     }
   }
 
@@ -207,6 +234,25 @@ export default function LandlordsPage() {
                 landlordId={landlord.id}
                 subject="Important tenancy update"
               />
+              <div style={{ marginTop: '0.75rem' }}>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-compact"
+                  onClick={() => void inviteSelectedLandlord()}
+                >
+                  Invite to landlord portal
+                </button>
+                {inviteUrl ? (
+                  <p className="muted" style={{ marginTop: '0.5rem', wordBreak: 'break-all' }}>
+                    Invite link: {inviteUrl}
+                  </p>
+                ) : null}
+                {error ? (
+                  <p className="muted" style={{ color: '#9b2c2c' }}>
+                    {error}
+                  </p>
+                ) : null}
+              </div>
 
               <h3 style={{ margin: '1.25rem 0 0.65rem', fontSize: '1.05rem' }}>
                 Related tenants

@@ -1,6 +1,7 @@
 export {
   InquiryForm,
   DocumentsForm,
+  KycFeesForm,
   KycForm,
   PaymentForm,
   LeaseForm,

@@ -14,6 +14,7 @@ const envSchema = z.object({
     .string()
     .default('http://localhost:5173,https://midpointblue.co.za'),
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
+  APP_PUBLIC_URL: z.string().optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)

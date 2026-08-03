@@ -20,6 +20,8 @@ import { paymentsRouter } from './routes/payments.js'
 import { issuesRouter } from './routes/issues.js'
 import { activityRouter } from './routes/activity.js'
 import { documentsRouter } from './routes/documents.js'
+import { invitesRouter } from './routes/invites.js'
+import { portalRouter } from './routes/portal.js'
 
 function isAllowedOrigin(origin: string): boolean {
   if (env.corsOrigins.includes(origin)) return true
@@ -76,6 +78,8 @@ export function createApp() {
   app.use('/api/health', healthRouter)
   app.use('/api/auth/login', loginLimiter)
   app.use('/api/auth', authRouter)
+  app.use('/api/invites', invitesRouter)
+  app.use('/api/portal', portalRouter)
   app.use('/api/orgs', requireAuth, orgsRouter)
   app.use('/api/buildings', buildingsRouter)
   app.use('/api/landlords', landlordsRouter)

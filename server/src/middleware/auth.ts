@@ -1,5 +1,5 @@
 import type { NextFunction, Request, Response } from 'express'
-import { verifyAccessToken, type AuthTokenPayload } from '../lib/auth.js'
+import { verifyAccessToken, type AuthRole, type AuthTokenPayload } from '../lib/auth.js'
 import { AppError } from './error.js'
 
 declare global {
@@ -38,3 +38,17 @@ export function requireOrg(req: Request, _res: Response, next: NextFunction) {
   }
   next()
 }
+
+export function requireRoles(...roles: AuthRole[]) {
+  return (req: Request, _res: Response, next: NextFunction) => {
+    if (!req.auth) return next(new AppError(401, 'Authentication required'))
+    if (!roles.includes(req.auth.role)) {
+      return next(new AppError(403, 'You do not have permission for this action'))
+    }
+    next()
+  }
+}
+
+export const requireAgent = requireRoles('admin', 'agent')
+export const requireTenant = requireRoles('tenant')
+export const requireLandlord = requireRoles('landlord')

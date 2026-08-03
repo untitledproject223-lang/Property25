@@ -62,6 +62,37 @@
   gap: 1.25rem;
 }
 
+.progress-hold-banner {
+  margin: 0 1.5rem 0.85rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: 8px;
+  display: grid;
+  gap: 0.2rem;
+  border: 1px solid;
+}
+
+.progress-hold-banner.progress-hold-yours {
+  background: #ecfdf3;
+  border-color: #abefc6;
+  color: #027a48;
+}
+
+.progress-hold-banner.progress-hold-theirs {
+  background: #fef3f2;
+  border-color: #fecdca;
+  color: #912018;
+}
+
+.progress-hold-banner strong {
+  font-size: 0.98rem;
+}
+
+.progress-hold-banner span {
+  font-size: 0.88rem;
+  line-height: 1.45;
+  opacity: 0.95;
+}
+
 .completion-banner {
   padding: 1.15rem 1.35rem;
   border-radius: var(--radius);

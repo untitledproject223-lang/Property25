@@ -1,12 +1,17 @@
+import { useEffect } from 'react'
 import './forms.css'
 import { useDashboard } from '../../data/DashboardContext'
 import { vacantApartments } from '../../data/unitHelpers'
 import { formatMoney } from '../../data/utils'
-import { fileToBase64, uploadDocument } from '../../data/api'
+import { fileToBase64, uploadDocument, type AuthRole } from '../../data/api'
+
+/** Default admin / KYC check fee when a unit is selected (ZAR). */
+const DEFAULT_ADMIN_FEE = '350'
 
 interface FormProps {
   data: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
+  viewerRole?: AuthRole
 }
 
 function str(data: Record<string, unknown>, key: string) {
@@ -15,6 +20,39 @@ function str(data: Record<string, unknown>, key: string) {
 
 function bool(data: Record<string, unknown>, key: string) {
   return data[key] === true
+}
+
+/** Add whole months to a YYYY-MM-DD date, clamping to the last day of the target month. */
+function addMonthsToIsoDate(dateStr: string, months: number): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateStr.trim())
+  if (!match) return ''
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  if (!year || !month || !day) return ''
+
+  const base = new Date(year, month - 1, 1)
+  base.setMonth(base.getMonth() + months)
+  const lastDay = new Date(base.getFullYear(), base.getMonth() + 1, 0).getDate()
+  base.setDate(Math.min(day, lastDay))
+
+  const y = base.getFullYear()
+  const m = String(base.getMonth() + 1).padStart(2, '0')
+  const d = String(base.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function termMonthsFromAgreement(term: string): 12 | 24 | null {
+  if (term === '12') return 12
+  if (term === '24') return 24
+  return null
+}
+
+function agreementTermLabel(term: string): string {
+  if (term === '12') return '12 Months'
+  if (term === '24') return '24 Months'
+  if (term === 'other') return 'Other'
+  return term
 }
 
 async function persistUpload(
@@ -38,19 +76,25 @@ async function persistUpload(
   })
 }
 
-function makeFileHandler(
+function makeMultiFileHandler(
   data: Record<string, unknown>,
   onChange: (key: string, value: unknown) => void,
   fieldKey: string,
   docType: string,
 ) {
-  return async (name: string, file?: File) => {
-    onChange(fieldKey, name)
-    if (!file) return
+  return async (fileList: FileList | null) => {
+    if (!fileList?.length) return
+    const files = Array.from(fileList)
+    const existing = fileNames(data, fieldKey)
+    onChange(`${fieldKey}Uploading`, true)
+    onChange(`${fieldKey}Error`, '')
+    const uploaded = [...existing]
     try {
-      onChange(`${fieldKey}Uploading`, true)
-      onChange(`${fieldKey}Error`, '')
-      await persistUpload(data, docType, file)
+      for (const file of files) {
+        await persistUpload(data, docType, file)
+        uploaded.push(file.name)
+        onChange(fieldKey, uploaded)
+      }
     } catch (err) {
       onChange(
         `${fieldKey}Error`,
@@ -60,6 +104,18 @@ function makeFileHandler(
       onChange(`${fieldKey}Uploading`, false)
     }
   }
+}
+
+function fileNames(data: Record<string, unknown>, key: string): string[] {
+  const value = data[key]
+  if (Array.isArray(value)) return value.map(String).filter(Boolean)
+  if (typeof value === 'string' && value.trim()) {
+    return value
+      .split(/\n|,/)
+      .map((part) => part.trim())
+      .filter(Boolean)
+  }
+  return []
 }
 
 function UnitSelectField({
@@ -87,12 +143,16 @@ function UnitSelectField({
       onChange('propertyAddress', `${b.address}, Unit ${apartment.unitNumber}`)
       onChange('unitNumber', apartment.unitNumber)
       onChange('apartmentAmount', String(apartment.rent))
+      onChange('apartmentDeposit', String(apartment.deposit))
+      onChange('adminFeeAmount', DEFAULT_ADMIN_FEE)
       onChange('listingRef', `${b.name}-${apartment.unitNumber}`)
       onChange('amountType', 'monthly-rent')
     } else {
       onChange('propertyAddress', '')
       onChange('unitNumber', '')
       onChange('apartmentAmount', '')
+      onChange('apartmentDeposit', '')
+      onChange('adminFeeAmount', '')
       onChange('listingRef', '')
     }
   }
@@ -138,6 +198,14 @@ function UnitSelectField({
             <span className="field-label">Deposit</span>
             <input type="text" value={formatMoney(selected.deposit)} readOnly />
           </label>
+          <label className="field">
+            <span className="field-label">Admin fees</span>
+            <input
+              type="text"
+              value={formatMoney(Number(str(data, 'adminFeeAmount') || DEFAULT_ADMIN_FEE))}
+              readOnly
+            />
+          </label>
         </>
       ) : null}
       {vacant.length === 0 ? (
@@ -154,7 +222,7 @@ function FileField({
   id,
   label,
   hint,
-  value,
+  files,
   accept,
   onChange,
   uploading,
@@ -162,26 +230,38 @@ function FileField({
   id: string
   label: string
   hint?: string
-  value: string
+  files: string[]
   accept?: string
-  onChange: (name: string, file?: File) => void
+  onChange: (fileList: FileList | null) => void
   uploading?: boolean
 }) {
   return (
-    <label className="field file-field" htmlFor={id}>
+    <label className="field file-field field-span" htmlFor={id}>
       <span className="field-label">{label}</span>
       {hint ? <span className="field-hint">{hint}</span> : null}
       <input
         id={id}
         type="file"
         accept={accept}
+        multiple
         disabled={uploading}
         onChange={(e) => {
-          const file = e.target.files?.[0]
-          onChange(file?.name ?? '', file)
+          onChange(e.target.files)
+          e.target.value = ''
         }}
       />
-      {value ? <span className="file-selected">{value}{uploading ? ' (uploading…)' : ''}</span> : null}
+      {uploading ? <span className="file-selected">Uploading…</span> : null}
+      {files.length > 0 ? (
+        <ul className="file-selected-list">
+          {files.map((name) => (
+            <li key={`${id}-${name}`} className="file-selected">
+              {name}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <span className="field-hint">You can select multiple files.</span>
+      )}
     </label>
   )
 }
@@ -224,6 +304,26 @@ function InspectionItem({
 }
 
 export function InquiryForm({ data, onChange }: FormProps) {
+  const agreementTerm = str(data, 'agreementTerm')
+  const moveInDate = str(data, 'moveInDate')
+  const fixedTermMonths = termMonthsFromAgreement(agreementTerm)
+  const termEndEditable = agreementTerm === 'other'
+
+  function setMoveInDate(value: string) {
+    onChange('moveInDate', value)
+    if (fixedTermMonths && value) {
+      onChange('termEndDate', addMonthsToIsoDate(value, fixedTermMonths))
+    }
+  }
+
+  function setAgreementTerm(value: string) {
+    onChange('agreementTerm', value)
+    const months = termMonthsFromAgreement(value)
+    if (months && moveInDate) {
+      onChange('termEndDate', addMonthsToIsoDate(moveInDate, months))
+    }
+  }
+
   return (
     <div className="form-grid">
       <div className="role-callout role-agent" role="note">
@@ -329,8 +429,8 @@ export function InquiryForm({ data, onChange }: FormProps) {
           <span className="field-label">Move-in / start date</span>
           <input
             type="date"
-            value={str(data, 'moveInDate')}
-            onChange={(e) => onChange('moveInDate', e.target.value)}
+            value={moveInDate}
+            onChange={(e) => setMoveInDate(e.target.value)}
           />
         </label>
       </fieldset>
@@ -340,20 +440,47 @@ export function InquiryForm({ data, onChange }: FormProps) {
         <UnitSelectField data={data} onChange={onChange} />
         <label className="field">
           <span className="field-label">Agreement term</span>
-          <input
-            type="text"
-            value={str(data, 'agreementTerm')}
-            onChange={(e) => onChange('agreementTerm', e.target.value)}
-            placeholder="12 months"
-          />
+          <select
+            value={agreementTerm}
+            onChange={(e) => setAgreementTerm(e.target.value)}
+          >
+            <option value="">Select…</option>
+            <option value="12">12 Months</option>
+            <option value="24">24 Months</option>
+            <option value="other">Other</option>
+          </select>
         </label>
         <label className="field">
           <span className="field-label">Term end date</span>
           <input
             type="date"
             value={str(data, 'termEndDate')}
-            onChange={(e) => onChange('termEndDate', e.target.value)}
+            onChange={(e) => {
+              if (!termEndEditable) return
+              onChange('termEndDate', e.target.value)
+            }}
+            disabled={!termEndEditable}
+            aria-readonly={!termEndEditable}
+            title={
+              termEndEditable
+                ? 'Select the custom term end date'
+                : fixedTermMonths
+                  ? 'Locked — calculated from move-in date and agreement term'
+                  : 'Select 12 Months, 24 Months, or Other first'
+            }
           />
+          {fixedTermMonths ? (
+            <span className="field-hint">
+              Auto-filled from move-in date + {fixedTermMonths} months and locked.
+              {!moveInDate ? ' Set a move-in date to calculate it.' : ''}
+            </span>
+          ) : termEndEditable ? (
+            <span className="field-hint">Enter the custom term end date.</span>
+          ) : (
+            <span className="field-hint">
+              Choose an agreement term to set or unlock the end date.
+            </span>
+          )}
         </label>
         <label className="field">
           <span className="field-label">Application type</span>
@@ -386,8 +513,8 @@ export function DocumentsForm({ data, onChange }: FormProps) {
       <div className="role-callout role-applicant" role="note">
         <strong>Editable by applicant / tenant only.</strong>
         <span>
-          Complete your income, monthly expenses, and document uploads. The agent
-          cannot edit this step.
+          Complete your income and document uploads. Monthly expenses are optional. The
+          agent cannot edit this step.
         </span>
       </div>
 
@@ -438,8 +565,10 @@ export function DocumentsForm({ data, onChange }: FormProps) {
       </fieldset>
 
       <fieldset className="form-section">
-        <legend>Monthly expenses</legend>
-        <p className="section-lead">Enter typical monthly amounts for each expense.</p>
+        <legend>Monthly expenses (optional)</legend>
+        <p className="section-lead">
+          Optional — add typical monthly amounts if available. You can skip this section.
+        </p>
         <label className="field">
           <span className="field-label">Current rent / bond</span>
           <input
@@ -514,83 +643,79 @@ export function DocumentsForm({ data, onChange }: FormProps) {
       <fieldset className="form-section">
         <legend>Supporting documents</legend>
         <p className="section-lead">
-          Upload files for each category. All uploads are optional for navigation.
+          Upload one or more files per category. All uploads are optional for navigation.
         </p>
         <FileField
           id="idDocs"
           label="1. ID documents"
           hint="Passport, driver's license, or national ID"
-          value={str(data, 'idDocs')}
+          files={fileNames(data, 'idDocs')}
           uploading={bool(data, 'idDocsUploading')}
-          onChange={makeFileHandler(data, onChange, 'idDocs', 'idDoc')}
+          onChange={makeMultiFileHandler(data, onChange, 'idDocs', 'idDoc')}
         />
         <FileField
-          id="incomeDocs"
-          label="2. Income documents"
-          hint="Pay stubs, tax returns, or employment letter"
-          value={str(data, 'incomeDocs')}
-          uploading={bool(data, 'incomeDocsUploading')}
-          onChange={makeFileHandler(data, onChange, 'incomeDocs', 'incomeDoc')}
+          id="payslipDocs"
+          label="2. Payslip"
+          hint="Recent payslips"
+          files={fileNames(data, 'payslipDocs')}
+          uploading={bool(data, 'payslipDocsUploading')}
+          onChange={makeMultiFileHandler(data, onChange, 'payslipDocs', 'payslip')}
         />
         <FileField
-          id="propertyDocs"
-          label="3. Property documents"
-          hint="Offer letter, listing sheet, or related property paperwork"
-          value={str(data, 'propertyDocs')}
-          uploading={bool(data, 'propertyDocsUploading')}
-          onChange={makeFileHandler(data, onChange, 'propertyDocs', 'propertyDoc')}
-        />
-        <FileField
-          id="assetDocs"
-          label="4. Assets / bank statements"
-          hint="Recent bank or investment statements"
-          value={str(data, 'assetDocs')}
-          uploading={bool(data, 'assetDocsUploading')}
-          onChange={makeFileHandler(data, onChange, 'assetDocs', 'assetDoc')}
-        />
-        <FileField
-          id="creditDocs"
-          label="5. Credit documents"
-          hint="Credit authorization or existing report"
-          value={str(data, 'creditDocs')}
-          uploading={bool(data, 'creditDocsUploading')}
-          onChange={makeFileHandler(data, onChange, 'creditDocs', 'creditDoc')}
+          id="bankStatementDocs"
+          label="3. 3 Months Bank statement"
+          hint="Bank statements covering the last three months"
+          files={fileNames(data, 'bankStatementDocs')}
+          uploading={bool(data, 'bankStatementDocsUploading')}
+          onChange={makeMultiFileHandler(
+            data,
+            onChange,
+            'bankStatementDocs',
+            'bankStatement',
+          )}
         />
         {str(data, 'idDocsError') ||
-        str(data, 'incomeDocsError') ||
-        str(data, 'propertyDocsError') ||
-        str(data, 'assetDocsError') ||
-        str(data, 'creditDocsError') ? (
+        str(data, 'payslipDocsError') ||
+        str(data, 'bankStatementDocsError') ? (
           <p className="field-hint" style={{ color: '#c0392b' }}>
             {str(data, 'idDocsError') ||
-              str(data, 'incomeDocsError') ||
-              str(data, 'propertyDocsError') ||
-              str(data, 'assetDocsError') ||
-              str(data, 'creditDocsError')}
+              str(data, 'payslipDocsError') ||
+              str(data, 'bankStatementDocsError')}
           </p>
         ) : null}
       </fieldset>
 
       <fieldset className="form-section">
         <legend>Consent & submission</legend>
+        <p className="field-hint">Both checkboxes are required to continue.</p>
         <label className="check-field">
           <input
             type="checkbox"
+            required
             checked={bool(data, 'creditCheckConsent')}
             onChange={(e) => onChange('creditCheckConsent', e.target.checked)}
           />
           <span>
             I consent to the system administrator running an identity (KYC) and credit
-            check as part of this application
+            check as part of this application{' '}
+            <span className="required-marker" aria-hidden="true">
+              *
+            </span>
           </span>
         </label>
         <label className="check-field">
           <input
             type="checkbox"
+            required
             checked={bool(data, 'docsSubmitted')}
             onChange={(e) => onChange('docsSubmitted', e.target.checked)}
           />
-          <span>I confirm my details and documents are ready for first review</span>
+          <span>
+            I confirm my details and documents are ready for first review{' '}
+            <span className="required-marker" aria-hidden="true">
+              *
+            </span>
+          </span>
         </label>
         <label className="field field-span">
           <span className="field-label">Submission notes</span>
@@ -707,28 +832,206 @@ export function KycForm({ data, onChange }: FormProps) {
           id="kycReportFile"
           label="Attach KYC / credit report"
           accept=".pdf,image/*"
-          value={str(data, 'kycReportFile')}
-          onChange={makeFileHandler(data, onChange, 'kycReportFile', 'kycReportFile')}
+          files={fileNames(data, 'kycReportFile')}
+          uploading={bool(data, 'kycReportFileUploading')}
+          onChange={makeMultiFileHandler(data, onChange, 'kycReportFile', 'kycReportFile')}
         />
       </fieldset>
 
       <fieldset className="form-section">
         <legend>Approvals</legend>
+        <p className="field-hint">Agent approval is required to continue.</p>
         <label className="check-field">
           <input
             type="checkbox"
+            required
             checked={bool(data, 'agentKycApproved')}
             onChange={(e) => onChange('agentKycApproved', e.target.checked)}
           />
-          <span>Agent approves this KYC report and recommends proceeding</span>
+          <span>
+            Agent approves this KYC report and recommends proceeding{' '}
+            <span className="required-marker" aria-hidden="true">
+              *
+            </span>
+          </span>
         </label>
+      </fieldset>
+    </div>
+  )
+}
+
+function BankingDetailsCard({ data, onChange }: FormProps) {
+  return (
+    <div className="banking-card">
+      <h3>Banking details for this rental unit</h3>
+      <dl className="banking-details">
+        <div>
+          <dt>Account name</dt>
+          <dd>
+            <input
+              type="text"
+              value={str(data, 'bankAccountName') || 'Property Trust Account'}
+              onChange={(e) => onChange('bankAccountName', e.target.value)}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>Bank</dt>
+          <dd>
+            <input
+              type="text"
+              value={str(data, 'bankName') || 'First National Bank'}
+              onChange={(e) => onChange('bankName', e.target.value)}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>Account number</dt>
+          <dd>
+            <input
+              type="text"
+              value={str(data, 'bankAccountNumber') || '6284017392'}
+              onChange={(e) => onChange('bankAccountNumber', e.target.value)}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>Branch code</dt>
+          <dd>
+            <input
+              type="text"
+              value={str(data, 'bankBranchCode') || '250655'}
+              onChange={(e) => onChange('bankBranchCode', e.target.value)}
+            />
+          </dd>
+        </div>
+        <div>
+          <dt>Reference</dt>
+          <dd>
+            <input
+              type="text"
+              value={
+                str(data, 'bankReference') ||
+                str(data, 'listingRef') ||
+                str(data, 'unitNumber') ||
+                'UNIT-REF'
+              }
+              onChange={(e) => onChange('bankReference', e.target.value)}
+            />
+          </dd>
+        </div>
+      </dl>
+      <p className="banking-hint">
+        Use the reference above so the payment can be matched to this apartment.
+      </p>
+    </div>
+  )
+}
+
+function paymentAmountFromStep1(data: Record<string, unknown>) {
+  const deposit = str(data, 'apartmentDeposit')
+  const rent = str(data, 'apartmentAmount')
+  const admin = str(data, 'adminFeeAmount') || DEFAULT_ADMIN_FEE
+  const total =
+    (Number(deposit) || 0) + (Number(rent) || 0) + (Number(admin) || 0)
+  return {
+    deposit,
+    rent,
+    admin,
+    total: total > 0 ? String(total) : '',
+  }
+}
+
+export function KycFeesForm({ data, onChange }: FormProps) {
+  const kycFee = str(data, 'adminFeeAmount') || DEFAULT_ADMIN_FEE
+  const storedAdmin = str(data, 'adminFeeAmount')
+  const storedKycFee = str(data, 'kycFeeAmount')
+
+  useEffect(() => {
+    if (!storedAdmin) {
+      onChange('adminFeeAmount', DEFAULT_ADMIN_FEE)
+    }
+  }, [storedAdmin, onChange])
+
+  useEffect(() => {
+    if (storedKycFee !== kycFee) {
+      onChange('kycFeeAmount', kycFee)
+    }
+  }, [kycFee, storedKycFee, onChange])
+
+  return (
+    <div className="form-grid">
+      <div className="role-callout role-applicant" role="note">
+        <strong>KYC check admin fee required from the tenant.</strong>
+        <span>
+          Pay the admin fee for the KYC / credit check using the banking details
+          below, then upload proof of payment.
+        </span>
+      </div>
+
+      <BankingDetailsCard data={data} onChange={onChange} />
+
+      <fieldset className="form-section">
+        <legend>Amount to pay</legend>
+        <label className="field">
+          <span className="field-label">KYC check admin fees</span>
+          <input type="number" min={0} value={kycFee} readOnly />
+          <span className="field-hint">Auto-filled from the application details.</span>
+        </label>
+        <label className="field">
+          <span className="field-label">Payment date</span>
+          <input
+            type="date"
+            value={str(data, 'kycFeePaymentDate')}
+            onChange={(e) => onChange('kycFeePaymentDate', e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">Payment method</span>
+          <select
+            value={str(data, 'kycFeePaymentMethod')}
+            onChange={(e) => onChange('kycFeePaymentMethod', e.target.value)}
+          >
+            <option value="">Select…</option>
+            <option value="eft">EFT / bank transfer</option>
+            <option value="card">Card</option>
+            <option value="cash">Cash deposit</option>
+          </select>
+        </label>
+      </fieldset>
+
+      <fieldset className="form-section">
+        <legend>Proof of payment</legend>
+        <FileField
+          id="kycFeeProofOfPayment"
+          label="Upload proof of payment"
+          hint="Bank receipt, screenshot, or PDF confirmation"
+          accept=".pdf,image/*"
+          files={fileNames(data, 'kycFeeProofOfPayment')}
+          uploading={bool(data, 'kycFeeProofOfPaymentUploading')}
+          onChange={makeMultiFileHandler(
+            data,
+            onChange,
+            'kycFeeProofOfPayment',
+            'kycFeeProofOfPayment',
+          )}
+        />
         <label className="check-field">
           <input
             type="checkbox"
-            checked={bool(data, 'landlordKycApproved')}
-            onChange={(e) => onChange('landlordKycApproved', e.target.checked)}
+            checked={bool(data, 'kycFeePaymentConfirmed')}
+            onChange={(e) => onChange('kycFeePaymentConfirmed', e.target.checked)}
           />
-          <span>Landlord approves this KYC report and accepts the applicant</span>
+          <span>I confirm the KYC check admin fees have been paid</span>
+        </label>
+        <label className="field field-span">
+          <span className="field-label">Payment notes</span>
+          <textarea
+            rows={3}
+            value={str(data, 'kycFeePaymentNotes')}
+            onChange={(e) => onChange('kycFeePaymentNotes', e.target.value)}
+            placeholder="Transaction reference or other payment details…"
+          />
         </label>
       </fieldset>
     </div>
@@ -736,6 +1039,37 @@ export function KycForm({ data, onChange }: FormProps) {
 }
 
 export function PaymentForm({ data, onChange }: FormProps) {
+  const amounts = paymentAmountFromStep1(data)
+  const storedDeposit = str(data, 'paymentDeposit')
+  const storedRent = str(data, 'paymentRent')
+  const storedAdmin = str(data, 'paymentAdminFees')
+  const storedTotal = str(data, 'paymentTotal')
+
+  useEffect(() => {
+    if (amounts.deposit && storedDeposit !== amounts.deposit) {
+      onChange('paymentDeposit', amounts.deposit)
+    }
+    if (amounts.rent && storedRent !== amounts.rent) {
+      onChange('paymentRent', amounts.rent)
+    }
+    if (amounts.admin && storedAdmin !== amounts.admin) {
+      onChange('paymentAdminFees', amounts.admin)
+    }
+    if (amounts.total && storedTotal !== amounts.total) {
+      onChange('paymentTotal', amounts.total)
+    }
+  }, [
+    amounts.deposit,
+    amounts.rent,
+    amounts.admin,
+    amounts.total,
+    storedDeposit,
+    storedRent,
+    storedAdmin,
+    storedTotal,
+    onChange,
+  ])
+
   return (
     <div className="form-grid">
       <div className="role-callout role-applicant" role="note">
@@ -746,111 +1080,28 @@ export function PaymentForm({ data, onChange }: FormProps) {
         </span>
       </div>
 
-      <div className="banking-card">
-        <h3>Banking details for this rental unit</h3>
-        <dl className="banking-details">
-          <div>
-            <dt>Account name</dt>
-            <dd>
-              <input
-                type="text"
-                value={str(data, 'bankAccountName') || 'Property Trust Account'}
-                onChange={(e) => onChange('bankAccountName', e.target.value)}
-              />
-            </dd>
-          </div>
-          <div>
-            <dt>Bank</dt>
-            <dd>
-              <input
-                type="text"
-                value={str(data, 'bankName') || 'First National Bank'}
-                onChange={(e) => onChange('bankName', e.target.value)}
-              />
-            </dd>
-          </div>
-          <div>
-            <dt>Account number</dt>
-            <dd>
-              <input
-                type="text"
-                value={str(data, 'bankAccountNumber') || '6284017392'}
-                onChange={(e) => onChange('bankAccountNumber', e.target.value)}
-              />
-            </dd>
-          </div>
-          <div>
-            <dt>Branch code</dt>
-            <dd>
-              <input
-                type="text"
-                value={str(data, 'bankBranchCode') || '250655'}
-                onChange={(e) => onChange('bankBranchCode', e.target.value)}
-              />
-            </dd>
-          </div>
-          <div>
-            <dt>Reference</dt>
-            <dd>
-              <input
-                type="text"
-                value={
-                  str(data, 'bankReference') ||
-                  str(data, 'listingRef') ||
-                  str(data, 'unitNumber') ||
-                  'UNIT-REF'
-                }
-                onChange={(e) => onChange('bankReference', e.target.value)}
-              />
-            </dd>
-          </div>
-        </dl>
-        <p className="banking-hint">
-          Use the reference above so the payment can be matched to this apartment.
-        </p>
-      </div>
+      <BankingDetailsCard data={data} onChange={onChange} />
 
       <fieldset className="form-section">
         <legend>Amounts to pay</legend>
         <label className="field">
           <span className="field-label">Deposit</span>
-          <input
-            type="number"
-            min={0}
-            value={str(data, 'paymentDeposit')}
-            onChange={(e) => onChange('paymentDeposit', e.target.value)}
-            placeholder="4800"
-          />
+          <input type="number" min={0} value={amounts.deposit} readOnly />
+          <span className="field-hint">From the selected unit on step 1.</span>
         </label>
         <label className="field">
           <span className="field-label">Rent</span>
-          <input
-            type="number"
-            min={0}
-            value={str(data, 'paymentRent')}
-            onChange={(e) => onChange('paymentRent', e.target.value)}
-            placeholder={str(data, 'apartmentAmount') || '2400'}
-          />
+          <input type="number" min={0} value={amounts.rent} readOnly />
+          <span className="field-hint">From the selected unit on step 1.</span>
         </label>
         <label className="field">
           <span className="field-label">Admin fees</span>
-          <input
-            type="number"
-            min={0}
-            value={str(data, 'paymentAdminFees')}
-            onChange={(e) => onChange('paymentAdminFees', e.target.value)}
-            placeholder="350"
-          />
+          <input type="number" min={0} value={amounts.admin} readOnly />
+          <span className="field-hint">From the application details on step 1.</span>
         </label>
         <label className="field">
-          <span className="field-label">Total paid</span>
-          <input
-            type="number"
-            min={0}
-            value={str(data, 'paymentTotal')}
-            onChange={(e) => onChange('paymentTotal', e.target.value)}
-            placeholder="7550"
-          />
+          <span className="field-label">Total to pay</span>
+          <input type="number" min={0} value={amounts.total} readOnly />
         </label>
         <label className="field">
           <span className="field-label">Payment date</span>
@@ -881,8 +1132,9 @@ export function PaymentForm({ data, onChange }: FormProps) {
           label="Upload proof of payment"
           hint="Bank receipt, screenshot, or PDF confirmation"
           accept=".pdf,image/*"
-          value={str(data, 'proofOfPayment')}
-          onChange={makeFileHandler(data, onChange, 'proofOfPayment', 'proofOfPayment')}
+          files={fileNames(data, 'proofOfPayment')}
+          uploading={bool(data, 'proofOfPaymentUploading')}
+          onChange={makeMultiFileHandler(data, onChange, 'proofOfPayment', 'proofOfPayment')}
         />
         <label className="check-field">
           <input
@@ -906,26 +1158,32 @@ export function PaymentForm({ data, onChange }: FormProps) {
   )
 }
 
-export function LeaseForm({ data, onChange }: FormProps) {
+export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
+  const isAgent = viewerRole === 'admin' || viewerRole === 'agent' || !viewerRole
+  const canTenant = !viewerRole || viewerRole === 'tenant'
+  const canLandlord = !viewerRole || viewerRole === 'landlord'
+  const canAgent = isAgent
+
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
         <strong>Lease signing — all parties.</strong>
         <span>
           Upload or review the lease PDF, then the applicant, landlord, and agent each
-          sign online below.
+          sign online below. You can only complete your own signature block.
         </span>
       </div>
 
-      <fieldset className="form-section">
+      <fieldset className="form-section" disabled={!canAgent}>
         <legend>Lease document</legend>
         <FileField
           id="leasePdf"
           label="Lease agreement (PDF)"
           hint="Upload the lease PDF to be signed"
           accept=".pdf,application/pdf"
-          value={str(data, 'leasePdf')}
-          onChange={makeFileHandler(data, onChange, 'leasePdf', 'leasePdf')}
+          files={fileNames(data, 'leasePdf')}
+          uploading={bool(data, 'leasePdfUploading')}
+          onChange={makeMultiFileHandler(data, onChange, 'leasePdf', 'leasePdf')}
         />
         <label className="field">
           <span className="field-label">Lease start date</span>
@@ -950,7 +1208,7 @@ export function LeaseForm({ data, onChange }: FormProps) {
           <div className="pdf-preview-header">
             <span>Lease agreement</span>
             <span className="pdf-file-name">
-              {str(data, 'leasePdf') || 'No PDF uploaded yet'}
+              {fileNames(data, 'leasePdf').join(', ') || 'No PDF uploaded yet'}
             </span>
           </div>
           <div className="pdf-preview-body">
@@ -963,7 +1221,7 @@ export function LeaseForm({ data, onChange }: FormProps) {
               Tenant: <strong>{str(data, 'applicantName') || 'Applicant name'}</strong>
             </p>
             <p>
-              Term: <strong>{str(data, 'agreementTerm') || '—'}</strong>
+              Term: <strong>{agreementTermLabel(str(data, 'agreementTerm')) || '—'}</strong>
             </p>
             <p className="pdf-preview-note">
               Preview placeholder — in production this area shows the uploaded PDF for
@@ -973,7 +1231,7 @@ export function LeaseForm({ data, onChange }: FormProps) {
         </div>
 
         <div className="signature-grid">
-          <fieldset className="signature-block">
+          <fieldset className="signature-block" disabled={!canTenant}>
             <legend>Applicant signature</legend>
             <label className="field">
               <span className="field-label">Full legal name</span>
@@ -1012,7 +1270,7 @@ export function LeaseForm({ data, onChange }: FormProps) {
             </label>
           </fieldset>
 
-          <fieldset className="signature-block">
+          <fieldset className="signature-block" disabled={!canLandlord}>
             <legend>Landlord signature</legend>
             <label className="field">
               <span className="field-label">Full legal name</span>
@@ -1051,7 +1309,7 @@ export function LeaseForm({ data, onChange }: FormProps) {
             </label>
           </fieldset>
 
-          <fieldset className="signature-block">
+          <fieldset className="signature-block" disabled={!canAgent}>
             <legend>Agent signature</legend>
             <label className="field">
               <span className="field-label">Full legal name</span>
@@ -1208,14 +1466,17 @@ const INSPECTION_ITEMS = [
   { id: 'inspCleanliness', label: 'Overall cleanliness' },
 ]
 
-export function MoveInForm({ data, onChange }: FormProps) {
+export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
+  const canAgent = !viewerRole || viewerRole === 'admin' || viewerRole === 'agent'
+  const canTenant = !viewerRole || viewerRole === 'tenant'
+  const canLandlord = !viewerRole || viewerRole === 'landlord'
   return (
     <div className="form-grid">
-      <div className="role-callout role-agent" role="note">
-        <strong>Move-in inspection — agent / realtor.</strong>
+      <div className="role-callout role-shared" role="note">
+        <strong>Move-in inspection — agent, tenant & landlord.</strong>
         <span>
-          Record the apartment condition before the tenant moves in. This baseline is
-          compared with the move-out inspection later.
+          Record the apartment condition before the tenant moves in. Each party signs off
+          their acknowledgement below.
         </span>
       </div>
 
@@ -1303,8 +1564,14 @@ export function MoveInForm({ data, onChange }: FormProps) {
           label="Move-in photos"
           hint="Upload photos of rooms and any defects"
           accept="image/*,.pdf"
-          value={str(data, 'inspectionPhotos')}
-          onChange={makeFileHandler(data, onChange, 'inspectionPhotos', 'inspectionPhotos')}
+          files={fileNames(data, 'inspectionPhotos')}
+          uploading={bool(data, 'inspectionPhotosUploading')}
+          onChange={makeMultiFileHandler(
+            data,
+            onChange,
+            'inspectionPhotos',
+            'inspectionPhotos',
+          )}
         />
         <label className="field field-span">
           <span className="field-label">General comments</span>
@@ -1318,6 +1585,7 @@ export function MoveInForm({ data, onChange }: FormProps) {
         <label className="check-field">
           <input
             type="checkbox"
+            disabled={!canAgent}
             checked={bool(data, 'inspectionAgentSigned')}
             onChange={(e) => onChange('inspectionAgentSigned', e.target.checked)}
           />
@@ -1326,10 +1594,20 @@ export function MoveInForm({ data, onChange }: FormProps) {
         <label className="check-field">
           <input
             type="checkbox"
+            disabled={!canTenant}
             checked={bool(data, 'inspectionTenantSigned')}
             onChange={(e) => onChange('inspectionTenantSigned', e.target.checked)}
           />
           <span>Tenant acknowledges the recorded condition of the apartment</span>
+        </label>
+        <label className="check-field">
+          <input
+            type="checkbox"
+            disabled={!canLandlord}
+            checked={bool(data, 'inspectionLandlordSigned')}
+            onChange={(e) => onChange('inspectionLandlordSigned', e.target.checked)}
+          />
+          <span>Landlord acknowledges the move-in inspection record</span>
         </label>
       </fieldset>
     </div>

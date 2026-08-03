@@ -1,9 +1,9 @@
 import { Router } from 'express'
 import { sql } from '../db/client.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireAgent } from '../middleware/auth.js'
 
 export const dashboardRouter = Router()
-dashboardRouter.use(requireAuth)
+dashboardRouter.use(requireAuth, requireAgent)
 
 /** Aggregate payload shaped for the existing React dashboard. */
 dashboardRouter.get('/', async (req, res, next) => {
@@ -17,7 +17,8 @@ dashboardRouter.get('/', async (req, res, next) => {
         sql`
           SELECT id, building_id AS "buildingId", unit_number AS "unitNumber",
             rent::float8 AS rent, deposit::float8 AS deposit, status,
-            next_due_date AS "nextDueDate", landlord_id AS "landlordId"
+            next_due_date AS "nextDueDate", landlord_id AS "landlordId",
+            ticket_manager AS "ticketManager"
           FROM apartments WHERE org_id = ${orgId}
           ORDER BY unit_number
         `,
@@ -25,7 +26,8 @@ dashboardRouter.get('/', async (req, res, next) => {
           SELECT id, apartment_id AS "apartmentId", name, email, phone, whatsapp,
             lease_start AS "leaseStart", lease_end AS "leaseEnd", status,
             balance::float8 AS balance, docs_json AS docs,
-            move_in_inspection_json AS "moveInInspection"
+            move_in_inspection_json AS "moveInInspection",
+            user_id AS "userId"
           FROM tenants WHERE org_id = ${orgId}
           ORDER BY name
         `,
@@ -44,6 +46,8 @@ dashboardRouter.get('/', async (req, res, next) => {
         `,
         sql`
           SELECT id, tenant_id AS "tenantId", subject, status, severity, audience,
+            issue_type AS "issueType", management_owner AS "managementOwner",
+            decision_json AS decision,
             created_at AS "createdAt", messages_json AS messages
           FROM issues WHERE org_id = ${orgId}
           ORDER BY created_at DESC

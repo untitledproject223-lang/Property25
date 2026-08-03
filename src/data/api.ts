@@ -51,11 +51,14 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   return json as T
 }
 
+export type AuthRole = 'admin' | 'agent' | 'tenant' | 'landlord'
+
 export type AuthUser = {
   id: string
   email: string
   name: string
-  role: 'admin' | 'agent'
+  role: AuthRole
+  profileId?: string | null
   org: { id: string; name: string; slug: string }
 }
 
@@ -199,10 +202,11 @@ export async function createPayment(input: {
 }
 
 export async function createIssue(input: {
-  tenantId: string
+  tenantId?: string
   subject: string
   severity?: string
   audience?: string
+  issueType?: 'maintenance' | 'general' | 'invoice'
   message?: string
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/issues', {
@@ -216,6 +220,16 @@ export async function patchIssue(
   input: {
     status?: string
     reply?: { author?: string; body: string }
+    decision?: {
+      outcome: 'accept' | 'reject' | 'conditional'
+      payer?: 'landlord' | 'tenant' | 'split'
+      landlordShare?: number
+      tenantShare?: number
+      workDescription?: string
+      materialsCost?: number
+      labourCost?: number
+      note?: string
+    }
   },
 ) {
   return apiRequest<{ data: Record<string, unknown> }>(`/api/issues/${id}`, {
@@ -243,21 +257,130 @@ export async function createApplication(input: {
   applicantEmail: string
   applicantPhone?: string
   status?: string
+  inviteApplicant?: boolean
+  formData?: Record<string, unknown>
 }) {
-  return apiRequest<{ data: Record<string, unknown> }>('/api/applications', {
+  return apiRequest<{
+    data: Record<string, unknown> & {
+      invite?: { inviteUrl: string; email: string } | null
+    }
+  }>('/api/applications', {
     method: 'POST',
     body: input,
   })
 }
 
+export async function listApplications() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/applications')
+}
+
+export async function fetchApplication(id: string) {
+  return apiRequest<{
+    data: Record<string, unknown> & {
+      formData?: Record<string, unknown>
+      completedStages?: string[]
+      payloadUpdatedAt?: string | null
+    }
+  }>(`/api/applications/${id}`)
+}
+
 export async function patchApplication(
   id: string,
-  input: { status?: string; completenessPct?: number },
+  input: {
+    status?: string
+    completenessPct?: number
+    formData?: Record<string, unknown>
+    completedStages?: string[]
+    apartmentId?: string | null
+    applicantName?: string
+    applicantEmail?: string
+    applicantPhone?: string | null
+  },
 ) {
-  return apiRequest<{ data: Record<string, unknown> }>(`/api/applications/${id}`, {
+  return apiRequest<{
+    data: Record<string, unknown> & {
+      formData?: Record<string, unknown>
+      completedStages?: string[]
+    }
+  }>(`/api/applications/${id}`, {
     method: 'PATCH',
     body: input,
   })
+}
+
+export async function createInvite(input: {
+  email: string
+  role: 'tenant' | 'landlord'
+  applicationId?: string | null
+  tenantId?: string | null
+  landlordId?: string | null
+}) {
+  return apiRequest<{
+    data: { id: string; email: string; role: string; inviteUrl: string }
+  }>('/api/invites', {
+    method: 'POST',
+    body: input,
+  })
+}
+
+export async function fetchInvite(token: string) {
+  return apiRequest<{
+    data: {
+      email: string
+      role: string
+      orgName: string
+      applicationId?: string | null
+      expiresAt: string
+    }
+  }>(`/api/invites/${token}`, { auth: false })
+}
+
+export async function acceptInvite(input: {
+  token: string
+  fullName: string
+  password: string
+}) {
+  const result = await apiRequest<{ data: { token: string; user: AuthUser } }>(
+    '/api/invites/accept',
+    { method: 'POST', body: input, auth: false },
+  )
+  setToken(result.data.token)
+  return result.data
+}
+
+export async function fetchTenantStays() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/portal/tenant/stays')
+}
+
+export async function fetchTenantStay(id: string) {
+  return apiRequest<{ data: Record<string, unknown> }>(`/api/portal/tenant/stays/${id}`)
+}
+
+export async function fetchTenantProfile() {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/portal/tenant/profile')
+}
+
+export async function fetchLandlordPortfolio() {
+  return apiRequest<{
+    data: {
+      landlord: Record<string, unknown>
+      units: Array<Record<string, unknown>>
+    }
+  }>('/api/portal/landlord/portfolio')
+}
+
+export async function setUnitTicketManager(
+  unitId: string,
+  ticketManager: 'landlord' | 'agent',
+) {
+  return apiRequest<{ data: Record<string, unknown> }>(
+    `/api/portal/landlord/units/${unitId}/ticket-manager`,
+    { method: 'PATCH', body: { ticketManager } },
+  )
+}
+
+export async function listIssues() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/issues')
 }
 
 export type DocumentMeta = {

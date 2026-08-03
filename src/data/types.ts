@@ -6,9 +6,10 @@ export type PaymentStatus = 'paid' | 'pending' | 'failed'
 export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue'
 export type InvoiceItemType = 'rent' | 'deposit' | 'admin' | 'maintenance' | 'other'
 export type InvoiceBillingKind = 'recurring' | 'one_time'
-export type IssueStatus = 'open' | 'pending' | 'resolved'
+export type IssueStatus = 'open' | 'pending' | 'resolved' | 'rejected'
 export type IssueSeverity = 'low' | 'medium' | 'high'
 export type IssueAudience = 'agent' | 'landlord' | 'both'
+export type IssueType = 'maintenance' | 'general' | 'invoice'
 export type MessageAuthor = 'tenant' | 'agent' | 'landlord'
 export type ContactChannel = 'email' | 'whatsapp' | 'phone' | 'note'
 export type ActivityKind = 'contact' | 'landlord_update' | 'note'
@@ -36,6 +37,7 @@ export interface Apartment {
   status: ApartmentStatus
   landlordId: string
   nextDueDate?: string
+  ticketManager?: 'landlord' | 'agent'
 }
 
 export interface Tenant {
@@ -108,6 +110,9 @@ export interface Issue {
   status: IssueStatus
   severity: IssueSeverity
   audience: IssueAudience
+  issueType?: IssueType
+  managementOwner?: 'landlord' | 'agent'
+  decision?: Record<string, unknown>
   createdAt: string
   messages: IssueMessage[]
 }

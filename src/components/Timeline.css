@@ -112,6 +112,46 @@
   color: var(--ink);
 }
 
+.timeline-step.status-pending .timeline-circle {
+  border-color: #b42318;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+.timeline-step.status-pending .timeline-label {
+  color: #b42318;
+  font-weight: 600;
+}
+
+.timeline-step.status-locked .timeline-circle {
+  border-color: #d0d5dd;
+  background: #f2f4f7;
+  color: #98a2b3;
+}
+
+.timeline-step.status-locked .timeline-label {
+  color: #98a2b3;
+}
+
+.timeline-step.status-locked .timeline-node:disabled {
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+
+.timeline-wait {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: #b42318;
+}
+
+.timeline-lock {
+  display: block;
+}
+
 .timeline-step.phase-legal.status-current .timeline-circle,
 .timeline-step.phase-closing.status-current .timeline-circle {
   border-color: var(--teal-deep);

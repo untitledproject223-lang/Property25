@@ -358,6 +358,17 @@
   font-weight: 500;
 }
 
+.file-selected-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.file-selected-list .file-selected {
+  list-style: disc;
+}
+
 .check-field {
   grid-column: 1 / -1;
   display: flex;
@@ -380,6 +391,11 @@
 .check-field span {
   font-size: 0.92rem;
   font-weight: 500;
+}
+
+.required-marker {
+  color: #b42318;
+  font-weight: 700;
 }
 
 @media (max-width: 720px) {
