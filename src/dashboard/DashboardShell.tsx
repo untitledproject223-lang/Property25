@@ -61,7 +61,7 @@ export function DashboardShell() {
             <p className="dash-topbar-agent">
               {user?.name ?? 'Agent'} · {user?.role}
             </p>
-            <button type="button" className="dash-nav-link" onClick={logout}>
+            <button type="button" className="btn btn-ghost btn-compact" onClick={logout}>
               Sign out
             </button>
           </div>

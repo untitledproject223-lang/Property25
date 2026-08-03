@@ -7,51 +7,43 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  padding: 0.95rem 1.1rem;
-  border-radius: var(--radius);
-  border: 1px solid transparent;
-  font-size: 0.92rem;
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #f7f9fc;
+  color: var(--ink);
+  font-size: 0.9rem;
   line-height: 1.45;
 }
 
 .role-callout strong {
-  font-size: 0.95rem;
+  font-size: 0.92rem;
 }
 
 .role-callout span {
   color: var(--ink-muted);
 }
 
-.role-callout.role-agent {
-  background: rgba(217, 234, 244, 0.7);
-  border-color: #9fc3d9;
-  color: #1f5574;
-}
-
-.role-callout.role-applicant {
-  background: rgba(215, 236, 234, 0.75);
-  border-color: #9fcfc9;
-  color: var(--teal-deep);
-}
-
+.role-callout.role-agent,
+.role-callout.role-applicant,
 .role-callout.role-shared {
-  background: rgba(245, 230, 210, 0.7);
-  border-color: #e2c49a;
-  color: #8a5414;
+  background: #f7f9fc;
+  border-color: var(--line);
+  color: var(--ink);
 }
 
 .kyc-report-banner,
 .completion-summary {
   padding: 1.1rem 1.2rem;
   border-radius: var(--radius);
-  background: linear-gradient(120deg, var(--sky-soft), rgba(255, 255, 255, 0.7));
-  border: 1px solid #9fc3d9;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
 }
 
 .kyc-report-title,
 .completion-summary h3 {
   font-family: var(--font-display);
-  font-size: 1.2rem;
+  font-size: 1.1rem;
   margin: 0 0 0.35rem;
   color: var(--ink);
 }
@@ -64,21 +56,22 @@
 }
 
 .completion-summary {
-  background: linear-gradient(120deg, var(--green-soft), rgba(255, 255, 255, 0.7));
-  border-color: #b5d7c2;
+  background: #f4f8f5;
+  border-color: #c5d9cc;
 }
 
 .banking-card {
   padding: 1.2rem 1.3rem;
   border-radius: var(--radius);
-  background: linear-gradient(145deg, #1a3d4a 0%, #0f6e6a 100%);
-  color: #f4fffe;
-  box-shadow: 0 14px 36px rgba(15, 110, 106, 0.28);
+  background: var(--teal-deep);
+  color: #f4f8fb;
+  box-shadow: var(--shadow);
 }
 
 .banking-card h3 {
   margin: 0 0 1rem;
-  font-size: 1.15rem;
+  font-size: 1.1rem;
+  font-family: var(--font-display);
   color: #fff;
 }
 
@@ -110,7 +103,7 @@
 .banking-details input {
   width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.28);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   padding: 0.55rem 0.75rem;
@@ -138,7 +131,7 @@
   border: 1px solid var(--line);
   border-radius: var(--radius);
   overflow: hidden;
-  background: #fffdf9;
+  background: #fff;
 }
 
 .pdf-preview-header {
@@ -146,7 +139,7 @@
   justify-content: space-between;
   gap: 1rem;
   padding: 0.75rem 1rem;
-  background: #efece4;
+  background: #f0f3f7;
   border-bottom: 1px solid var(--line);
   font-size: 0.86rem;
   font-weight: 600;
@@ -160,21 +153,14 @@
 .pdf-preview-body {
   padding: 1.5rem 1.25rem 1.75rem;
   min-height: 14rem;
-  background:
-    linear-gradient(#fffdf9, #fffdf9),
-    repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 27px,
-      rgba(201, 194, 180, 0.35) 28px
-    );
+  background: #fff;
 }
 
 .pdf-doc-title {
   font-family: var(--font-display);
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   margin: 0 0 1rem;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
 }
 
 .pdf-preview-body p {
@@ -196,9 +182,9 @@
 .signature-block {
   margin: 0;
   padding: 1rem 1.1rem 1.15rem;
-  border: 1px solid #e2c49a;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(245, 230, 210, 0.35);
+  background: #fafbfc;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.85rem 1rem;
@@ -207,13 +193,13 @@
 .signature-block legend {
   padding: 0 0.35rem;
   font-family: var(--font-display);
-  font-size: 1.02rem;
+  font-size: 1rem;
   font-weight: 600;
 }
 
 .signature-input {
-  font-family: 'Fraunces', Georgia, serif !important;
-  font-size: 1.35rem !important;
+  font-family: var(--font-display) !important;
+  font-size: 1.2rem !important;
   font-style: italic;
   min-height: 3rem;
 }
@@ -234,9 +220,9 @@
   gap: 0.65rem;
   align-items: center;
   padding: 0.55rem 0.65rem;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(201, 194, 180, 0.7);
+  border-radius: 8px;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
 }
 
 .inspection-item-label {
@@ -248,8 +234,8 @@
 .inspection-item input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 10px;
-  background: #fffdf9;
+  border-radius: 8px;
+  background: #fff;
   padding: 0.55rem 0.7rem;
 }
 
@@ -279,38 +265,36 @@
 
 .form-section {
   margin: 0;
-  padding: 1.1rem 1.15rem 1.2rem;
-  border: 1px solid rgba(201, 194, 180, 0.9);
+  padding: 1.15rem 1.2rem 1.25rem;
+  border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: rgba(255, 255, 255, 0.55);
+  background: #fff;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.95rem 1rem;
+  gap: 1rem 1.15rem;
 }
 
 .form-section legend {
   padding: 0 0.35rem;
   font-family: var(--font-display);
-  font-size: 1.05rem;
+  font-size: 1rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
   color: var(--ink);
 }
 
-.form-section.accent-legal {
-  background: rgba(245, 230, 210, 0.35);
-  border-color: #e2c49a;
-}
-
+.form-section.accent-legal,
 .form-section.accent-closing {
-  background: rgba(217, 238, 226, 0.45);
-  border-color: #b5d7c2;
+  background: #fafbfc;
+  border-color: var(--line);
 }
 
 .section-lead {
   grid-column: 1 / -1;
   color: var(--ink-muted);
-  font-size: 0.92rem;
+  font-size: 0.9rem;
   margin-bottom: 0.15rem;
+  line-height: 1.5;
 }
 
 .field {
@@ -324,9 +308,10 @@
 }
 
 .field-label {
-  font-size: 0.86rem;
+  font-size: 0.82rem;
   font-weight: 600;
-  color: var(--ink);
+  letter-spacing: 0.01em;
+  color: var(--ink-muted);
 }
 
 .field-hint {
@@ -343,9 +328,9 @@
 .field textarea {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fffdf9;
-  padding: 0.7rem 0.85rem;
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.65rem 0.8rem;
   outline: none;
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
@@ -359,7 +344,7 @@
 .field select:focus,
 .field textarea:focus {
   border-color: var(--teal);
-  box-shadow: 0 0 0 3px rgba(15, 110, 106, 0.14);
+  box-shadow: 0 0 0 3px rgba(26, 79, 110, 0.12);
 }
 
 .file-field input[type='file'] {
@@ -379,9 +364,9 @@
   align-items: flex-start;
   gap: 0.65rem;
   padding: 0.65rem 0.75rem;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.7);
-  border: 1px solid transparent;
+  border-radius: 8px;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
 }
 
 .check-field input {

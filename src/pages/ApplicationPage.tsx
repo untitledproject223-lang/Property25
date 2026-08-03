@@ -26,12 +26,24 @@ const STAGE_STATUS: Record<StageId, string> = {
   movein: 'tenant',
 }
 
+/** Testing defaults for Step 1 agent / realtor fields. */
+const DUMMY_AGENT_FIELDS: Record<string, string> = {
+  agentName: 'Alex Morgan',
+  agency: 'Midpoint Realty Demo',
+  agentEmail: 'alex.morgan@midpoint-demo.test',
+  agentPhone: '+27 21 555 0140',
+}
+
+function createInitialFormData(): Record<string, unknown> {
+  return { ...DUMMY_AGENT_FIELDS }
+}
+
 export default function ApplicationPage() {
   const navigate = useNavigate()
   const { completeApplication } = useDashboard()
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completed, setCompleted] = useState<Set<StageId>>(new Set())
-  const [formData, setFormData] = useState<Record<string, unknown>>({})
+  const [formData, setFormData] = useState<Record<string, unknown>>(createInitialFormData)
   const [assignedTenantId, setAssignedTenantId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -177,7 +189,7 @@ export default function ApplicationPage() {
   function startOver() {
     setCompleted(new Set())
     setCurrentIndex(0)
-    setFormData({})
+    setFormData(createInitialFormData())
     setAssignedTenantId(null)
     setError(null)
   }

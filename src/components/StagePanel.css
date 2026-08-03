@@ -1,30 +1,20 @@
 .stage-panel {
-  background: var(--surface);
-  border: 1px solid rgba(201, 194, 180, 0.85);
-  border-radius: calc(var(--radius) + 4px);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
   box-shadow: var(--shadow);
   overflow: hidden;
-  animation: panel-in 0.35s ease both;
 }
 
 .stage-panel-header {
-  padding: 1.4rem 1.5rem 1.1rem;
-  border-bottom: 1px solid rgba(201, 194, 180, 0.7);
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.55), transparent),
-    linear-gradient(110deg, var(--sky-soft), transparent 55%);
+  padding: 1.35rem 1.5rem 1.15rem;
+  border-bottom: 1px solid var(--line);
+  background: #f7f9fc;
 }
 
-.stage-panel.phase-legal .stage-panel-header {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.45), transparent),
-    linear-gradient(110deg, var(--amber-soft), transparent 55%);
-}
-
+.stage-panel.phase-legal .stage-panel-header,
 .stage-panel.phase-closing .stage-panel-header {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.45), transparent),
-    linear-gradient(110deg, var(--green-soft), transparent 55%);
+  background: #f7f9fc;
 }
 
 .stage-kicker-row {
@@ -36,81 +26,63 @@
 }
 
 .stage-kicker {
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
-  color: var(--teal);
+  color: var(--teal-deep);
   margin: 0;
 }
 
 .role-badge {
   display: inline-flex;
   align-items: center;
-  padding: 0.28rem 0.7rem;
-  border-radius: 999px;
-  font-size: 0.72rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
+  background: #fff;
+  border: 1px solid var(--line);
+  color: var(--ink-muted);
 }
 
-.role-badge.role-agent {
-  background: var(--sky-soft);
-  color: #1f5574;
-  border: 1px solid #9fc3d9;
-}
-
-.role-badge.role-applicant {
-  background: var(--teal-soft);
-  color: var(--teal-deep);
-  border: 1px solid #9fcfc9;
-}
-
+.role-badge.role-agent,
+.role-badge.role-applicant,
 .role-badge.role-shared {
-  background: var(--amber-soft);
-  color: #8a5414;
-  border: 1px solid #e2c49a;
+  background: #fff;
+  border-color: var(--line);
+  color: var(--ink-muted);
 }
 
-.stage-panel.phase-legal .stage-kicker {
-  color: var(--amber);
-}
-
+.stage-panel.phase-legal .stage-kicker,
 .stage-panel.phase-closing .stage-kicker {
-  color: var(--green);
+  color: var(--teal-deep);
 }
 
 .stage-panel-header h2 {
-  font-size: clamp(1.35rem, 2vw, 1.7rem);
+  font-size: clamp(1.25rem, 1.8vw, 1.5rem);
   margin-bottom: 0.45rem;
+  font-weight: 600;
 }
 
 .stage-desc {
   color: var(--ink-muted);
-  max-width: 62ch;
+  max-width: 68ch;
+  font-size: 0.95rem;
+  line-height: 1.55;
 }
 
 .stage-optional {
   margin-top: 0.7rem;
   font-size: 0.86rem;
   font-weight: 500;
-  color: var(--teal-deep);
+  color: var(--ink-muted);
 }
 
 .stage-panel-body {
-  padding: 1.25rem 1.5rem 1.5rem;
-}
-
-@keyframes panel-in {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  padding: 1.35rem 1.5rem 1.6rem;
 }
 
 @media (max-width: 720px) {

@@ -1,25 +1,25 @@
 :root {
   color-scheme: light;
-  --ink: #1a2b2a;
-  --ink-muted: #5a6e6c;
-  --paper: #f3f1eb;
-  --paper-deep: #e7e2d6;
-  --surface: rgba(255, 252, 247, 0.92);
-  --line: #c9c2b4;
-  --teal: #0f6e6a;
-  --teal-deep: #0a524f;
-  --teal-soft: #d7ecea;
-  --sky: #3d7ea6;
-  --sky-soft: #d9eaf4;
-  --amber: #c47a2b;
-  --amber-soft: #f5e6d2;
-  --green: #2f7a4d;
-  --green-soft: #d9eee2;
+  --ink: #1c2434;
+  --ink-muted: #5c677a;
+  --paper: #eef1f6;
+  --paper-deep: #dde3ec;
+  --surface: #ffffff;
+  --line: #cfd6e0;
+  --teal: #1a4f6e;
+  --teal-deep: #123a52;
+  --teal-soft: #e4eef5;
+  --sky: #2a5f8a;
+  --sky-soft: #e8f0f7;
+  --amber: #8a6a2f;
+  --amber-soft: #f3eee3;
+  --green: #2a5f45;
+  --green-soft: #e6f0ea;
   --danger-soft: #f5d9d6;
-  --shadow: 0 18px 50px rgba(26, 43, 42, 0.08);
-  --radius: 18px;
-  --font-sans: 'DM Sans', system-ui, sans-serif;
-  --font-display: 'Fraunces', Georgia, serif;
+  --shadow: 0 8px 28px rgba(28, 36, 52, 0.07);
+  --radius: 10px;
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'IBM Plex Serif', Georgia, 'Times New Roman', serif;
   font-family: var(--font-sans);
   line-height: 1.5;
   font-weight: 400;
@@ -46,9 +46,8 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(1200px 500px at 10% -10%, rgba(61, 126, 166, 0.18), transparent 55%),
-    radial-gradient(900px 420px at 90% 0%, rgba(15, 110, 106, 0.14), transparent 50%),
-    linear-gradient(180deg, #efece4 0%, var(--paper) 40%, #ebe7dc 100%);
+    radial-gradient(1000px 480px at 0% -5%, rgba(42, 95, 138, 0.1), transparent 55%),
+    linear-gradient(180deg, #e8edf3 0%, var(--paper) 45%, #e6ebf2 100%);
 }
 
 button,
@@ -64,8 +63,8 @@ h2,
 h3 {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
+  letter-spacing: -0.015em;
+  line-height: 1.2;
   margin: 0;
 }
 

@@ -7,10 +7,10 @@
 .tenant-avatar {
   width: 3.5rem;
   height: 3.5rem;
-  border-radius: 1rem;
+  border-radius: 8px;
   display: grid;
   place-items: center;
-  background: linear-gradient(145deg, var(--teal), var(--sky));
+  background: linear-gradient(145deg, var(--teal), var(--teal-deep));
   color: #fff;
   font-weight: 700;
   font-size: 1.1rem;
@@ -23,24 +23,24 @@
   gap: 0.35rem;
   margin-bottom: 1.1rem;
   padding: 0.35rem;
-  background: rgba(255, 255, 255, 0.55);
-  border: 1px solid rgba(201, 194, 180, 0.7);
-  border-radius: 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
 }
 
 .tenant-tab {
   border: none;
   background: transparent;
   padding: 0.55rem 0.85rem;
-  border-radius: 10px;
+  border-radius: 6px;
   font-weight: 600;
   color: var(--ink-muted);
   font-size: 0.88rem;
 }
 
 .tenant-tab.active {
-  background: var(--teal);
-  color: #f4fffe;
+  background: var(--teal-deep);
+  color: #f4f8fb;
 }
 
 .detail-grid {
@@ -83,8 +83,8 @@
 .form-stack select,
 .form-stack textarea {
   border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fffdf9;
+  border-radius: 8px;
+  background: #fff;
   padding: 0.65rem 0.8rem;
   font: inherit;
   font-weight: 400;
@@ -120,9 +120,9 @@
 .timeline-list li,
 .message-thread li {
   padding: 0.75rem 0.85rem;
-  border-radius: 12px;
+  border-radius: 8px;
   background: rgba(255, 255, 255, 0.7);
-  border: 1px solid rgba(201, 194, 180, 0.65);
+  border: 1px solid var(--line);
 }
 
 .msg-meta {
@@ -158,9 +158,9 @@
   gap: 0.75rem;
   width: 100%;
   text-align: left;
-  border: 1px solid rgba(201, 194, 180, 0.7);
-  background: #fffdf9;
-  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 8px;
   padding: 0.75rem 0.85rem;
   font: inherit;
 }
@@ -173,7 +173,7 @@
 .invoice-view {
   margin-top: 1rem;
   padding: 1rem;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(215, 236, 234, 0.35);
   border: 1px solid #9fcfc9;
 }
@@ -191,7 +191,7 @@
 .moveout-placeholder {
   margin-top: 1.25rem;
   padding: 1rem;
-  border-radius: 14px;
+  border-radius: 8px;
   border: 1px dashed var(--line);
   background: rgba(245, 230, 210, 0.35);
 }
