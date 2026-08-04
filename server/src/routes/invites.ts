@@ -4,16 +4,11 @@ import { z } from 'zod'
 import { sql } from '../db/client.js'
 import { signAccessToken } from '../lib/auth.js'
 import { generateInviteToken, hashInviteToken } from '../lib/inviteToken.js'
+import { inviteLink } from '../lib/publicUrl.js'
 import { requireAuth, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
-import { env } from '../config/env.js'
 
 export const invitesRouter = Router()
-
-function inviteUrl(token: string) {
-  const base = env.APP_PUBLIC_URL?.replace(/\/$/, '') || 'http://localhost:5173/real'
-  return `${base}/#/invite/${token}`
-}
 
 const createInviteSchema = z.object({
   email: z.string().email(),
@@ -66,7 +61,7 @@ invitesRouter.post('/', requireAuth, requireAgent, async (req, res, next) => {
         tenant_id AS "tenantId", landlord_id AS "landlordId", created_at AS "createdAt"
     `
 
-    const url = inviteUrl(token)
+    const url = inviteLink(token)
     console.log(`[invite] ${body.role} ${email} → ${url}`)
 
     res.status(201).json({

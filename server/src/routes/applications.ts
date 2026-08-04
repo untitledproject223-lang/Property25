@@ -5,15 +5,11 @@ import { requireAuth, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 import { canAccessApplication } from '../lib/applicationAccess.js'
 import { generateInviteToken } from '../lib/inviteToken.js'
+import { inviteLink } from '../lib/publicUrl.js'
 import { env } from '../config/env.js'
 
 export const applicationsRouter = Router()
 applicationsRouter.use(requireAuth)
-
-function inviteUrl(token: string) {
-  const base = env.APP_PUBLIC_URL?.replace(/\/$/, '') || 'http://localhost:5173/real'
-  return `${base}/#/invite/${token}`
-}
 
 function isDoneFlag(value: unknown): boolean {
   return value === true || value === 'true' || value === 1 || value === '1'
@@ -303,7 +299,7 @@ applicationsRouter.post('/', requireAgent, async (req, res, next) => {
           ${tokenHash}, ${expiresAt.toISOString()}, ${appId}, ${req.auth!.sub}
         )
       `
-      const url = inviteUrl(token)
+      const url = inviteLink(token)
       console.log(`[invite] tenant ${body.applicantEmail} → ${url}`)
       invite = { inviteUrl: url, email: body.applicantEmail }
     }
