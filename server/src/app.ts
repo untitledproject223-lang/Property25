@@ -37,6 +37,8 @@ export function createApp() {
   const app = express()
 
   app.set('trust proxy', 1)
+  // Authenticated CRM data must not be 304-cached by browsers (empty list trap).
+  app.set('etag', false)
   app.use(helmet())
   app.use(
     cors({
@@ -53,6 +55,11 @@ export function createApp() {
   )
   app.use(morgan(env.NODE_ENV === 'production' ? 'combined' : 'dev'))
   app.use(express.json({ limit: '8mb' }))
+  app.use('/api', (_req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private')
+    res.setHeader('Pragma', 'no-cache')
+    next()
+  })
 
   const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
