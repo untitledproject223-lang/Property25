@@ -31,16 +31,27 @@ export async function canAccessApplication(
   }
 
   if (auth.role === 'landlord') {
-    const rows = await sql`
-      SELECT a.id
-      FROM applications a
-      JOIN apartments apt ON apt.id = a.apartment_id
-      JOIN landlords l ON l.id = apt.landlord_id
-      WHERE a.id = ${applicationId}
-        AND a.org_id = ${auth.orgId}
-        AND l.user_id = ${auth.sub}
-      LIMIT 1
-    `
+    const rows = auth.profileId
+      ? await sql`
+          SELECT a.id
+          FROM applications a
+          JOIN apartments apt ON apt.id = a.apartment_id
+          JOIN landlords l ON l.id = apt.landlord_id
+          WHERE a.id = ${applicationId}
+            AND a.org_id = ${auth.orgId}
+            AND (l.user_id = ${auth.sub} OR l.id = ${auth.profileId})
+          LIMIT 1
+        `
+      : await sql`
+          SELECT a.id
+          FROM applications a
+          JOIN apartments apt ON apt.id = a.apartment_id
+          JOIN landlords l ON l.id = apt.landlord_id
+          WHERE a.id = ${applicationId}
+            AND a.org_id = ${auth.orgId}
+            AND l.user_id = ${auth.sub}
+          LIMIT 1
+        `
     return rows.length > 0
   }
 

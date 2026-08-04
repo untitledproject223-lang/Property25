@@ -142,19 +142,34 @@ applicationsRouter.get('/', async (req, res, next) => {
       `
     } else {
       // All applications on this landlord's units (including in-progress)
-      rows = await sql`
-        SELECT a.id, a.org_id, a.apartment_id, a.assigned_agent_id, a.status,
-          a.applicant_name, a.applicant_email, a.applicant_phone, a.completeness_pct,
-          a.applicant_user_id, a.created_at, a.updated_at,
-          apt.unit_number AS unit_number, b.name AS building_name
-        FROM applications a
-        JOIN apartments apt ON apt.id = a.apartment_id
-        JOIN buildings b ON b.id = apt.building_id
-        JOIN landlords l ON l.id = apt.landlord_id
-        WHERE a.org_id = ${req.orgId!}
-          AND l.user_id = ${auth.sub}
-        ORDER BY a.updated_at DESC
-      `
+      const profileId = auth.profileId ?? null
+      rows = profileId
+        ? await sql`
+            SELECT a.id, a.org_id, a.apartment_id, a.assigned_agent_id, a.status,
+              a.applicant_name, a.applicant_email, a.applicant_phone, a.completeness_pct,
+              a.applicant_user_id, a.created_at, a.updated_at,
+              apt.unit_number AS unit_number, b.name AS building_name
+            FROM applications a
+            JOIN apartments apt ON apt.id = a.apartment_id
+            LEFT JOIN buildings b ON b.id = apt.building_id
+            JOIN landlords l ON l.id = apt.landlord_id
+            WHERE a.org_id = ${req.orgId!}
+              AND (l.user_id = ${auth.sub} OR l.id = ${profileId})
+            ORDER BY a.updated_at DESC
+          `
+        : await sql`
+            SELECT a.id, a.org_id, a.apartment_id, a.assigned_agent_id, a.status,
+              a.applicant_name, a.applicant_email, a.applicant_phone, a.completeness_pct,
+              a.applicant_user_id, a.created_at, a.updated_at,
+              apt.unit_number AS unit_number, b.name AS building_name
+            FROM applications a
+            JOIN apartments apt ON apt.id = a.apartment_id
+            LEFT JOIN buildings b ON b.id = apt.building_id
+            JOIN landlords l ON l.id = apt.landlord_id
+            WHERE a.org_id = ${req.orgId!}
+              AND l.user_id = ${auth.sub}
+            ORDER BY a.updated_at DESC
+          `
     }
 
     res.json({ data: rows })
@@ -244,12 +259,14 @@ applicationsRouter.post('/', requireAgent, async (req, res, next) => {
   try {
     const body = createApplicationSchema.parse(req.body)
 
-    if (body.apartmentId) {
-      const apt = await sql`
-        SELECT id FROM apartments WHERE id = ${body.apartmentId} AND org_id = ${req.orgId!} LIMIT 1
-      `
-      if (apt.length === 0) throw new AppError(400, 'apartmentId not found in this org')
+    if (!body.apartmentId) {
+      throw new AppError(400, 'Select a unit before creating the application')
     }
+
+    const apt = await sql`
+      SELECT id FROM apartments WHERE id = ${body.apartmentId} AND org_id = ${req.orgId!} LIMIT 1
+    `
+    if (apt.length === 0) throw new AppError(400, 'apartmentId not found in this org')
 
     const rows = await sql`
       INSERT INTO applications (
@@ -380,9 +397,21 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
     const body = patchSchema.parse(req.body)
     const auth = req.auth!
 
+    const formApartmentId =
+      body.formData && typeof body.formData === 'object' && !Array.isArray(body.formData)
+        ? (body.formData as Record<string, unknown>).apartmentId
+        : undefined
+    const resolvedApartmentId =
+      body.apartmentId !== undefined && body.apartmentId !== null
+        ? body.apartmentId
+        : typeof formApartmentId === 'string' && formApartmentId.length > 0
+          ? formApartmentId
+          : null
+
     // Only agents may change apartment / core applicant identity fields
     if (
-      (body.apartmentId !== undefined ||
+      (resolvedApartmentId ||
+        body.apartmentId !== undefined ||
         body.applicantName !== undefined ||
         body.applicantEmail !== undefined) &&
       auth.role !== 'admin' &&
@@ -391,12 +420,21 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
       throw new AppError(403, 'Only agents can update application identity fields')
     }
 
+    if (resolvedApartmentId) {
+      const apt = await sql`
+        SELECT id FROM apartments
+        WHERE id = ${resolvedApartmentId} AND org_id = ${req.orgId!}
+        LIMIT 1
+      `
+      if (apt.length === 0) throw new AppError(400, 'apartmentId not found in this org')
+    }
+
     const rows = await sql`
       UPDATE applications
       SET
         status = COALESCE(${body.status ?? null}, status),
         completeness_pct = COALESCE(${body.completenessPct ?? null}, completeness_pct),
-        apartment_id = COALESCE(${body.apartmentId ?? null}, apartment_id),
+        apartment_id = COALESCE(${resolvedApartmentId}, apartment_id),
         applicant_name = COALESCE(${body.applicantName ?? null}, applicant_name),
         applicant_email = COALESCE(${body.applicantEmail ?? null}, applicant_email),
         applicant_phone = COALESCE(${body.applicantPhone ?? null}, applicant_phone),

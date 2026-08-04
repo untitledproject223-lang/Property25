@@ -382,6 +382,9 @@ export default function ApplicationPage() {
     }
 
     const apartmentId = asString(data.apartmentId) || null
+    if (!apartmentId) {
+      throw new Error('Select a unit before starting the application.')
+    }
     const result = await createApplication({
       apartmentId,
       applicantName: name,
@@ -405,6 +408,14 @@ export default function ApplicationPage() {
       return holders
         ? `Waiting on ${formatPartyList(holders.waitingOn)} to finish Stage ${holders.stage.number} (${holders.stage.shortTitle}).`
         : 'This step is not available for your action yet.'
+    }
+    if (currentStage.id === 'inquiry') {
+      if (!asString(formData.apartmentId)) {
+        return 'Select a unit before continuing.'
+      }
+      if (!asString(formData.applicantName).trim() || !asString(formData.applicantEmail).trim()) {
+        return 'Applicant name and email are required before continuing.'
+      }
     }
     if (currentStage.id === 'kyc') {
       if (!formData.agentKycApproved) {
@@ -440,6 +451,10 @@ export default function ApplicationPage() {
       completenessPct,
       formData: nextForm,
       completedStages: Array.from(nextCompleted),
+      apartmentId: asString(nextForm.apartmentId) || null,
+      applicantName: asString(nextForm.applicantName) || undefined,
+      applicantEmail: asString(nextForm.applicantEmail) || undefined,
+      applicantPhone: asString(nextForm.applicantPhone) || null,
     })
   }
 
@@ -530,6 +545,10 @@ export default function ApplicationPage() {
         status: STAGE_STATUS[currentStage.id] ?? 'in_progress',
         formData: nextForm,
         completedStages: Array.from(completed),
+        apartmentId: asString(nextForm.apartmentId) || null,
+        applicantName: asString(nextForm.applicantName) || undefined,
+        applicantEmail: asString(nextForm.applicantEmail) || undefined,
+        applicantPhone: asString(nextForm.applicantPhone) || null,
       })
       const remoteForm = (saved.data.formData ?? nextForm) as Record<string, unknown>
       const mergedForm: Record<string, unknown> = {
