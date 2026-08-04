@@ -6,7 +6,6 @@ import { AppError } from '../middleware/error.js'
 import { canAccessApplication } from '../lib/applicationAccess.js'
 import { generateInviteToken } from '../lib/inviteToken.js'
 import { inviteLink } from '../lib/publicUrl.js'
-import { env } from '../config/env.js'
 
 export const applicationsRouter = Router()
 applicationsRouter.use(requireAuth)
