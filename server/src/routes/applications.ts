@@ -15,6 +15,103 @@ function inviteUrl(token: string) {
   return `${base}/#/invite/${token}`
 }
 
+function isDoneFlag(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+/** Signature / shared-step keys that must never be wiped by another party's save. */
+const SIGN_DONE_KEYS = [
+  'signApplicantDone',
+  'signLandlordDone',
+  'signAgentDone',
+  'inspectionTenantSigned',
+  'inspectionLandlordSigned',
+  'inspectionAgentSigned',
+  'leaseNextTenant',
+  'leaseNextLandlord',
+  'leaseNextAgent',
+  'moveinNextTenant',
+  'moveinNextLandlord',
+  'moveinNextAgent',
+] as const
+
+const SIGN_TEXT_KEYS = [
+  'signApplicantName',
+  'signApplicantDate',
+  'signApplicantMark',
+  'signLandlordName',
+  'signLandlordDate',
+  'signLandlordMark',
+  'signAgentName',
+  'signAgentDate',
+  'signAgentMark',
+] as const
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return {}
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+}
+
+/** Merge application form payloads so concurrent party saves keep every signature. */
+function mergeApplicationForm(
+  existingRaw: unknown,
+  incomingRaw: unknown,
+): Record<string, unknown> {
+  const existing = asRecord(existingRaw)
+  const incoming = asRecord(incomingRaw)
+  const merged: Record<string, unknown> = { ...existing, ...incoming }
+
+  for (const key of SIGN_DONE_KEYS) {
+    merged[key] = isDoneFlag(existing[key]) || isDoneFlag(incoming[key])
+  }
+
+  for (const key of SIGN_TEXT_KEYS) {
+    const next = incoming[key]
+    const prev = existing[key]
+    if (typeof next === 'string' && next.trim()) {
+      merged[key] = next
+    } else if (typeof prev === 'string' && prev.trim()) {
+      merged[key] = prev
+    }
+  }
+
+  return merged
+}
+
+function mergeCompletedStages(existingRaw: unknown, incomingRaw: unknown): string[] {
+  return Array.from(new Set([...asStringArray(existingRaw), ...asStringArray(incomingRaw)]))
+}
+
+function withSharedStageCompletion(
+  form: Record<string, unknown>,
+  stages: string[],
+): string[] {
+  const next = new Set(stages)
+  // Unlock only after every party has clicked Next / Complete (not merely signed).
+  if (
+    isDoneFlag(form.leaseNextTenant) &&
+    isDoneFlag(form.leaseNextLandlord) &&
+    isDoneFlag(form.leaseNextAgent)
+  ) {
+    next.add('lease')
+  }
+  if (
+    isDoneFlag(form.moveinNextTenant) &&
+    isDoneFlag(form.moveinNextLandlord) &&
+    isDoneFlag(form.moveinNextAgent)
+  ) {
+    next.add('movein')
+  }
+  return Array.from(next)
+}
+
 applicationsRouter.get('/', async (req, res, next) => {
   try {
     const auth = req.auth!
@@ -22,33 +119,42 @@ applicationsRouter.get('/', async (req, res, next) => {
 
     if (auth.role === 'admin' || auth.role === 'agent') {
       rows = await sql`
-        SELECT id, org_id, apartment_id, assigned_agent_id, status,
-          applicant_name, applicant_email, applicant_phone, completeness_pct,
-          applicant_user_id, created_at, updated_at
-        FROM applications
-        WHERE org_id = ${req.orgId!}
-        ORDER BY updated_at DESC
+        SELECT a.id, a.org_id, a.apartment_id, a.assigned_agent_id, a.status,
+          a.applicant_name, a.applicant_email, a.applicant_phone, a.completeness_pct,
+          a.applicant_user_id, a.created_at, a.updated_at,
+          apt.unit_number AS unit_number, b.name AS building_name
+        FROM applications a
+        LEFT JOIN apartments apt ON apt.id = a.apartment_id
+        LEFT JOIN buildings b ON b.id = apt.building_id
+        WHERE a.org_id = ${req.orgId!}
+        ORDER BY a.updated_at DESC
       `
     } else if (auth.role === 'tenant') {
       rows = await sql`
-        SELECT id, org_id, apartment_id, assigned_agent_id, status,
-          applicant_name, applicant_email, applicant_phone, completeness_pct,
-          applicant_user_id, created_at, updated_at
-        FROM applications
-        WHERE org_id = ${req.orgId!}
+        SELECT a.id, a.org_id, a.apartment_id, a.assigned_agent_id, a.status,
+          a.applicant_name, a.applicant_email, a.applicant_phone, a.completeness_pct,
+          a.applicant_user_id, a.created_at, a.updated_at,
+          apt.unit_number AS unit_number, b.name AS building_name
+        FROM applications a
+        LEFT JOIN apartments apt ON apt.id = a.apartment_id
+        LEFT JOIN buildings b ON b.id = apt.building_id
+        WHERE a.org_id = ${req.orgId!}
           AND (
-            applicant_user_id = ${auth.sub}
-            OR lower(applicant_email) = lower(${auth.email})
+            a.applicant_user_id = ${auth.sub}
+            OR lower(a.applicant_email) = lower(${auth.email})
           )
-        ORDER BY updated_at DESC
+        ORDER BY a.updated_at DESC
       `
     } else {
+      // All applications on this landlord's units (including in-progress)
       rows = await sql`
         SELECT a.id, a.org_id, a.apartment_id, a.assigned_agent_id, a.status,
           a.applicant_name, a.applicant_email, a.applicant_phone, a.completeness_pct,
-          a.applicant_user_id, a.created_at, a.updated_at
+          a.applicant_user_id, a.created_at, a.updated_at,
+          apt.unit_number AS unit_number, b.name AS building_name
         FROM applications a
         JOIN apartments apt ON apt.id = a.apartment_id
+        JOIN buildings b ON b.id = apt.building_id
         JOIN landlords l ON l.id = apt.landlord_id
         WHERE a.org_id = ${req.orgId!}
           AND l.user_id = ${auth.sub}
@@ -57,6 +163,61 @@ applicationsRouter.get('/', async (req, res, next) => {
     }
 
     res.json({ data: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
+applicationsRouter.delete('/:id', async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const auth = req.auth!
+
+    if (!(await canAccessApplication(auth, id))) {
+      throw new AppError(404, 'Application not found')
+    }
+
+    const existing = await sql`
+      SELECT id, status FROM applications
+      WHERE id = ${id} AND org_id = ${req.orgId!}
+      LIMIT 1
+    `
+    if (existing.length === 0) throw new AppError(404, 'Application not found')
+
+    const status = String(existing[0].status)
+    if (status === 'tenant') {
+      throw new AppError(400, 'Completed tenancy applications cannot be deleted')
+    }
+
+    // Agents and landlords may delete in-progress applications they can access.
+    // Deleting the row removes it for every party (agent, landlord, and tenant lists).
+    if (auth.role !== 'admin' && auth.role !== 'agent' && auth.role !== 'landlord') {
+      throw new AppError(403, 'You cannot delete this application')
+    }
+
+    await sql`DELETE FROM invites WHERE application_id = ${id}`
+    await sql`DELETE FROM documents WHERE application_id = ${id} AND org_id = ${req.orgId!}`
+    await sql`DELETE FROM screening_requests WHERE application_id = ${id} AND org_id = ${req.orgId!}`
+    await sql`DELETE FROM affordability_results WHERE application_id = ${id} AND org_id = ${req.orgId!}`
+    await sql`DELETE FROM application_income WHERE application_id = ${id} AND org_id = ${req.orgId!}`
+    await sql`DELETE FROM application_payloads WHERE application_id = ${id}`
+    await sql`
+      DELETE FROM applications WHERE id = ${id} AND org_id = ${req.orgId!}
+    `
+
+    await sql`
+      INSERT INTO audit_events (org_id, action, entity_type, entity_id, meta_json, actor_user_id)
+      VALUES (
+        ${req.orgId!},
+        'application.deleted',
+        'application',
+        ${id},
+        ${JSON.stringify({ status, by: auth.role, removedFor: ['agent', 'landlord', 'tenant'] })}::jsonb,
+        ${auth.sub}
+      )
+    `
+
+    res.json({ data: { id, deleted: true } })
   } catch (err) {
     next(err)
   }
@@ -257,14 +418,20 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
         SELECT form_json, completed_stages FROM application_payloads
         WHERE application_id = ${id} LIMIT 1
       `
+      const existingForm = existing[0]?.form_json ?? {}
+      const existingStages = existing[0]?.completed_stages ?? []
+
       const nextForm =
         body.formData !== undefined
-          ? body.formData
-          : (existing[0]?.form_json ?? {})
-      const nextStages =
+          ? mergeApplicationForm(existingForm, body.formData)
+          : asRecord(existingForm)
+
+      const nextStages = withSharedStageCompletion(
+        nextForm,
         body.completedStages !== undefined
-          ? body.completedStages
-          : (existing[0]?.completed_stages ?? [])
+          ? mergeCompletedStages(existingStages, body.completedStages)
+          : asStringArray(existingStages),
+      )
 
       if (existing.length === 0) {
         await sql`

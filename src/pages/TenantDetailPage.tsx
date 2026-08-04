@@ -4,6 +4,12 @@ import { useDashboard } from '../data/DashboardContext'
 import { ContactActions } from '../dashboard/ContactActions'
 import type { InvoiceItem, InvoiceItemType, PaymentMethod, PaymentType } from '../data/types'
 import {
+  invoiceReason,
+  isTenantBillableTicket,
+  tenantMaintenanceAmount,
+  ticketInvoiceDescription,
+} from '../data/invoiceHelpers'
+import {
   formatDate,
   formatDateTime,
   formatMoney,
@@ -242,6 +248,8 @@ export default function TenantDetailPage() {
           invoices={invoices}
           defaultRent={apartment.rent}
           defaultDeposit={apartment.deposit}
+          issues={state.issues}
+          tenantId={tenant.id}
           onCreate={(payload) => void createInvoice({ tenantId: tenant.id, ...payload })}
           onStatus={(id, status) => void updateInvoiceStatus(id, status)}
         />
@@ -520,6 +528,8 @@ function InvoicesTab({
   defaultDeposit,
   onCreate,
   onStatus,
+  issues,
+  tenantId,
 }: {
   invoices: ReturnType<typeof useDashboard>['state']['invoices']
   defaultRent: number
@@ -529,20 +539,47 @@ function InvoicesTab({
     items: InvoiceItem[]
     notes?: string
     status?: 'draft' | 'sent'
+    billingKind?: 'recurring' | 'one_time'
+    isRecurring?: boolean
+    issueId?: string
   }) => void
   onStatus: (id: string, status: 'draft' | 'sent' | 'paid' | 'overdue') => void
+  issues?: ReturnType<typeof useDashboard>['state']['issues']
+  tenantId?: string
 }) {
   const [dueDate, setDueDate] = useState(
     new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10),
   )
+  const [billingKind, setBillingKind] = useState<'recurring' | 'one_time'>('one_time')
+  const [issueId, setIssueId] = useState('')
   const [includeRent, setIncludeRent] = useState(true)
   const [includeDeposit, setIncludeDeposit] = useState(false)
   const [includeAdmin, setIncludeAdmin] = useState(false)
   const [adminAmount, setAdminAmount] = useState('350')
+  const [maintenanceAmount, setMaintenanceAmount] = useState('')
   const [notes, setNotes] = useState('')
   const [selected, setSelected] = useState<string | null>(invoices[0]?.id ?? null)
 
   const selectedInvoice = invoices.find((i) => i.id === selected) ?? invoices[0]
+  const billableTickets = (issues ?? []).filter(
+    (issue) =>
+      (!tenantId || issue.tenantId === tenantId) && isTenantBillableTicket(issue),
+  )
+  const selectedTicket = billableTickets.find((i) => i.id === issueId)
+
+  function onTicketChange(id: string) {
+    setIssueId(id)
+    if (!id) return
+    const ticket = billableTickets.find((i) => i.id === id)
+    if (!ticket) return
+    const decision = (ticket.decision ?? {}) as Record<string, unknown>
+    setBillingKind('one_time')
+    setIncludeRent(false)
+    setIncludeDeposit(false)
+    setIncludeAdmin(false)
+    setMaintenanceAmount(String(tenantMaintenanceAmount(decision) || ''))
+    setNotes(`Linked to ticket: ${ticket.subject}`)
+  }
 
   function submit(e: FormEvent) {
     e.preventDefault()
@@ -550,12 +587,33 @@ function InvoicesTab({
     const push = (type: InvoiceItemType, description: string, amount: number) => {
       items.push({ type, description, amount })
     }
-    if (includeRent) push('rent', 'Monthly rent', defaultRent)
-    if (includeDeposit) push('deposit', 'Security deposit', defaultDeposit)
-    if (includeAdmin) push('admin', 'Admin fees', Number(adminAmount) || 0)
+    if (!issueId) {
+      if (includeRent) push('rent', 'Monthly rent', defaultRent)
+      if (includeDeposit) push('deposit', 'Security deposit', defaultDeposit)
+      if (includeAdmin) push('admin', 'Admin fees', Number(adminAmount) || 0)
+    } else {
+      const decision = (selectedTicket?.decision ?? {}) as Record<string, unknown>
+      push(
+        'maintenance',
+        selectedTicket
+          ? ticketInvoiceDescription(selectedTicket.subject, decision)
+          : 'Maintenance',
+        Number(maintenanceAmount) || tenantMaintenanceAmount(decision),
+      )
+    }
     if (items.length === 0) return
-    onCreate({ dueDate, items, notes: notes || undefined, status: 'draft' })
+    onCreate({
+      dueDate,
+      items,
+      notes: notes || undefined,
+      status: 'sent',
+      billingKind: issueId ? 'one_time' : billingKind,
+      isRecurring: !issueId && billingKind === 'recurring',
+      issueId: issueId || undefined,
+    })
     setNotes('')
+    setIssueId('')
+    setMaintenanceAmount('')
   }
 
   return (
@@ -570,6 +628,7 @@ function InvoicesTab({
               <tr>
                 <th>Issued</th>
                 <th>Due</th>
+                <th>Reason</th>
                 <th>Total</th>
                 <th>Status</th>
                 <th />
@@ -580,18 +639,27 @@ function InvoicesTab({
                 <tr key={inv.id}>
                   <td>{formatDate(inv.issuedAt)}</td>
                   <td>{formatDate(inv.dueDate)}</td>
+                  <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
                   <td>{formatMoney(inv.total)}</td>
                   <td>
                     <span className={`badge ${statusTone(inv.status)}`}>{inv.status}</span>
                   </td>
                   <td>
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-compact"
-                      onClick={() => setSelected(inv.id)}
-                    >
-                      View
-                    </button>
+                    <div className="btn-row">
+                      <Link
+                        className="btn btn-primary btn-compact"
+                        to={`/invoices/${inv.id}/view`}
+                      >
+                        View invoice
+                      </Link>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={() => setSelected(inv.id)}
+                      >
+                        Manage
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -600,6 +668,9 @@ function InvoicesTab({
           {selectedInvoice ? (
             <div className="invoice-view">
               <h3>Invoice {selectedInvoice.id}</h3>
+              <p>
+                <strong>Reason:</strong> {invoiceReason(selectedInvoice)}
+              </p>
               <ul>
                 {selectedInvoice.items.map((item, idx) => (
                   <li key={idx}>
@@ -652,51 +723,102 @@ function InvoicesTab({
               required
             />
           </label>
-          <label className="check-inline">
-            <input
-              type="checkbox"
-              checked={includeRent}
-              onChange={(e) => setIncludeRent(e.target.checked)}
-            />
-            Rent ({formatMoney(defaultRent)})
+          <fieldset className="form-section" style={{ margin: 0, padding: '0.75rem' }}>
+            <legend>Billing</legend>
+            <label className="check-inline">
+              <input
+                type="radio"
+                name="tenantBillingKind"
+                checked={billingKind === 'one_time' || Boolean(issueId)}
+                disabled={Boolean(issueId)}
+                onChange={() => setBillingKind('one_time')}
+              />
+              One-time
+            </label>
+            <label className="check-inline">
+              <input
+                type="radio"
+                name="tenantBillingKind"
+                checked={billingKind === 'recurring' && !issueId}
+                disabled={Boolean(issueId)}
+                onChange={() => setBillingKind('recurring')}
+              />
+              Recurring
+            </label>
+          </fieldset>
+          <label>
+            Attach to maintenance ticket
+            <select value={issueId} onChange={(e) => onTicketChange(e.target.value)}>
+              <option value="">None — standard invoice</option>
+              {billableTickets.map((issue) => (
+                <option key={issue.id} value={issue.id}>
+                  {issue.subject}
+                </option>
+              ))}
+            </select>
           </label>
-          <label className="check-inline">
-            <input
-              type="checkbox"
-              checked={includeDeposit}
-              onChange={(e) => setIncludeDeposit(e.target.checked)}
-            />
-            Deposit ({formatMoney(defaultDeposit)})
-          </label>
-          <label className="check-inline">
-            <input
-              type="checkbox"
-              checked={includeAdmin}
-              onChange={(e) => setIncludeAdmin(e.target.checked)}
-            />
-            Admin fees
-          </label>
-          {includeAdmin ? (
+          {!issueId ? (
+            <>
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={includeRent}
+                  onChange={(e) => setIncludeRent(e.target.checked)}
+                />
+                Rent ({formatMoney(defaultRent)})
+              </label>
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={includeDeposit}
+                  onChange={(e) => setIncludeDeposit(e.target.checked)}
+                />
+                Deposit ({formatMoney(defaultDeposit)})
+              </label>
+              <label className="check-inline">
+                <input
+                  type="checkbox"
+                  checked={includeAdmin}
+                  onChange={(e) => setIncludeAdmin(e.target.checked)}
+                />
+                Admin fees
+              </label>
+              {includeAdmin ? (
+                <label>
+                  Admin amount
+                  <input
+                    type="number"
+                    min={0}
+                    value={adminAmount}
+                    onChange={(e) => setAdminAmount(e.target.value)}
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : (
             <label>
-              Admin amount
+              Maintenance amount
               <input
                 type="number"
                 min={0}
-                value={adminAmount}
-                onChange={(e) => setAdminAmount(e.target.value)}
+                step="0.01"
+                value={maintenanceAmount}
+                onChange={(e) => setMaintenanceAmount(e.target.value)}
+                required
               />
             </label>
-          ) : null}
+          )}
           <label>
-            Notes
+            Reason for invoice
             <textarea
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
+              placeholder="Why this invoice is being issued…"
             />
           </label>
           <button type="submit" className="btn btn-primary btn-compact">
-            Create invoice
+            Create &amp; issue to tenant
           </button>
         </form>
       </div>

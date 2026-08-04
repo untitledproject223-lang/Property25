@@ -74,6 +74,67 @@
   line-height: 1.55;
 }
 
+.stage-sign-outline {
+  margin: 0.85rem 0 0;
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.stage-sign-outline-line {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  font-size: 0.9rem;
+}
+
+.stage-sign-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  min-width: 4.5rem;
+}
+
+.stage-sign-label.signed {
+  color: #027a48;
+}
+
+.stage-sign-label.pending {
+  color: #b54708;
+}
+
+.stage-sign-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.stage-sign-chip.signed {
+  background: #dcfae6;
+  color: #027a48;
+  border: 1px solid #abefc6;
+}
+
+.stage-sign-chip.pending {
+  background: #fffaeb;
+  color: #b54708;
+  border: 1px solid #fedf89;
+}
+
+.stage-sign-empty {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+
 .stage-fieldset {
   border: none;
   margin: 0;
@@ -102,7 +163,8 @@
 }
 
 .stage-waiting-banner,
-.stage-partial-banner {
+.stage-partial-banner,
+.stage-complete-banner {
   margin-top: 0.85rem;
   padding: 0.85rem 1rem;
   border-radius: 8px;
@@ -122,13 +184,49 @@
   color: #7a2e0e;
 }
 
+.stage-complete-banner {
+  background: #ecfdf3;
+  border: 1px solid #abefc6;
+  color: #027a48;
+}
+
+.stage-observing .stage-panel-header {
+  background: #fffaeb;
+  border-bottom-color: #fedf89;
+}
+
+.stage-all-signed .stage-panel-header {
+  background: #ecfdf3;
+  border-bottom-color: #abefc6;
+}
+
+.stage-success .stage-panel-header {
+  background: #ecfdf3;
+  border-bottom-color: #abefc6;
+  text-align: center;
+}
+
+.stage-success .stage-kicker-row {
+  justify-content: center;
+}
+
+.stage-success .stage-panel-header h2 {
+  color: #054f31;
+}
+
+.stage-body-observing {
+  opacity: 0.95;
+}
+
 .stage-waiting-banner strong,
-.stage-partial-banner strong {
+.stage-partial-banner strong,
+.stage-complete-banner strong {
   font-size: 0.95rem;
 }
 
 .stage-waiting-banner span,
-.stage-partial-banner span {
+.stage-partial-banner span,
+.stage-complete-banner span {
   font-size: 0.88rem;
   line-height: 1.45;
 }

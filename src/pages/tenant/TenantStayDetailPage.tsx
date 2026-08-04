@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { downloadDocument, fetchTenantStay } from '../../data/api'
+import { invoiceReason } from '../../data/invoiceHelpers'
 import { formatMoney } from '../../data/utils'
 
 export default function TenantStayDetailPage() {
@@ -56,14 +57,39 @@ export default function TenantStayDetailPage() {
             {invoices.length === 0 ? (
               <p className="empty-state">No invoices yet.</p>
             ) : (
-              <ul>
-                {invoices.map((inv) => (
-                  <li key={String(inv.id)}>
-                    {String(inv.dueDate)} · {formatMoney(Number(inv.total) || 0)} ·{' '}
-                    {String(inv.status)}
-                  </li>
-                ))}
-              </ul>
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Due</th>
+                    <th>Reason</th>
+                    <th>Amount</th>
+                    <th>Status</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invoices.map((inv) => (
+                    <tr key={String(inv.id)}>
+                      <td>{String(inv.dueDate)}</td>
+                      <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
+                      <td>{formatMoney(Number(inv.total) || 0)}</td>
+                      <td>{String(inv.status)}</td>
+                      <td>
+                        {String(inv.status) !== 'draft' ? (
+                          <Link
+                            className="btn btn-primary btn-compact"
+                            to={`/tenant/invoices/${String(inv.id)}/view`}
+                          >
+                            View invoice
+                          </Link>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             )}
           </section>
 

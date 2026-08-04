@@ -73,7 +73,7 @@ async function seed() {
   await sql`
     INSERT INTO apartments (org_id, building_id, landlord_id, unit_number, rent, deposit, status, next_due_date)
     VALUES
-      (${org.id}, ${building.id}, ${landlord.id}, '4B', 14500, 29000, 'occupied', '2026-08-01'),
+      (${org.id}, ${building.id}, ${landlord.id}, '4B', 14500, 29000, 'vacant', NULL),
       (${org.id}, ${building.id}, ${landlord.id}, '7C', 16000, 32000, 'vacant', NULL)
   `
 

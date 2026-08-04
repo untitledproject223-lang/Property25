@@ -119,6 +119,15 @@
   padding-top: 0.25rem;
 }
 
+.stage-actions-success {
+  justify-content: center;
+  padding-top: 0.5rem;
+}
+
+.stage-actions-success .btn-primary {
+  min-width: 12rem;
+}
+
 .btn {
   border: none;
   border-radius: 8px;

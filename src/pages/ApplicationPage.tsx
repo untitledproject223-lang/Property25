@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import type { PortalRole, StageId } from '../stages'
 import {
@@ -8,7 +8,10 @@ import {
   formatPartyList,
   isStageFullyComplete,
   isStageReachable,
-  pendingPartiesForStage,
+  markPartyAdvanced,
+  partyHasAdvanced,
+  partyHasSigned,
+  pendingAdvanceForStage,
   progressHolders,
 } from '../stages'
 import { Timeline } from '../components/Timeline'
@@ -36,19 +39,35 @@ const STAGE_STATUS: Record<StageId, string> = {
   kyc: 'under_review',
   payment: 'awaiting_signature',
   lease: 'awaiting_signature',
-  completion: 'approved',
   movein: 'tenant',
+  success: 'tenant',
 }
 
-const DUMMY_AGENT_FIELDS: Record<string, string> = {
-  agentName: 'Alex Morgan',
-  agency: 'Midpoint Realty Demo',
-  agentEmail: 'alex.morgan@midpoint-demo.test',
-  agentPhone: '+27 21 555 0140',
+function agentFieldsFromUser(user: {
+  name: string
+  email: string
+  org: { name: string }
+} | null | undefined): Record<string, string> {
+  if (!user) {
+    return {
+      agentName: '',
+      agency: '',
+      agentEmail: '',
+      agentPhone: '',
+    }
+  }
+  return {
+    agentName: user.name,
+    agency: user.org.name,
+    agentEmail: user.email,
+    agentPhone: '',
+  }
 }
 
-function createInitialFormData(): Record<string, unknown> {
-  return { ...DUMMY_AGENT_FIELDS }
+function createInitialFormData(
+  user?: { name: string; email: string; org: { name: string } } | null,
+): Record<string, unknown> {
+  return { ...agentFieldsFromUser(user) }
 }
 
 function roleCanAct(waitingOn: PortalRole[], role: PortalRole | undefined): boolean {
@@ -66,12 +85,31 @@ export default function ApplicationPage() {
 
   const [currentIndex, setCurrentIndex] = useState(0)
   const [completed, setCompleted] = useState<Set<StageId>>(new Set())
-  const [formData, setFormData] = useState<Record<string, unknown>>(createInitialFormData)
+  const [formData, setFormData] = useState<Record<string, unknown>>(() =>
+    createInitialFormData(),
+  )
   const [assignedTenantId, setAssignedTenantId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(Boolean(routeId))
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+
+  // Prefill locked agent fields from the signed-in agent for new applications
+  useEffect(() => {
+    if (routeId) return
+    if (!user || (user.role !== 'admin' && user.role !== 'agent')) return
+    const seeded = agentFieldsFromUser(user)
+    setFormData((prev) => {
+      if (asString(prev.applicationId)) return prev
+      return {
+        ...prev,
+        agentName: seeded.agentName,
+        agency: seeded.agency,
+        agentEmail: seeded.agentEmail,
+        agentPhone: asString(prev.agentPhone) || seeded.agentPhone,
+      }
+    })
+  }, [user, routeId])
 
   const currentStage = STAGES[currentIndex]
   const isLast = currentIndex === STAGES.length - 1
@@ -92,16 +130,191 @@ export default function ApplicationPage() {
   const canEdit = canEditStage(currentStage.id, user?.role)
   const waitingOn = holders && isActiveStep ? holders.waitingOn : []
   const iAmWaitingParty = roleCanAct(waitingOn, user?.role)
+  const isSharedStep = currentStage.id === 'lease' || currentStage.id === 'movein'
+  const sharedStageId = isSharedStep
+    ? (currentStage.id as 'lease' | 'movein')
+    : null
+  const advancePending = isSharedStep
+    ? pendingAdvanceForStage(currentStage.id, formData)
+    : []
+  const iHaveAdvanced =
+    Boolean(sharedStageId) && partyHasAdvanced(sharedStageId!, formData, user?.role)
 
-  const mode: 'edit' | 'view' | 'waiting' = stageComplete
-    ? 'view'
-    : isActiveStep
-      ? canEdit && iAmWaitingParty
-        ? 'edit'
-        : 'waiting'
-      : 'view'
+  const mode: 'edit' | 'view' | 'waiting' | 'observing' =
+    currentStage.id === 'success'
+      ? 'view'
+      : stageComplete
+        ? 'view'
+        : isActiveStep
+          ? isSharedStep
+            ? iHaveAdvanced
+              ? 'observing'
+              : 'edit'
+            : canEdit && iAmWaitingParty
+              ? 'edit'
+              : 'waiting'
+          : 'view'
+
+  const isSuccessStep = currentStage.id === 'success'
 
   const editable = mode === 'edit'
+  const modeRef = useRef(mode)
+  const stageIdRef = useRef(currentStage.id)
+  const formDataRef = useRef(formData)
+  modeRef.current = mode
+  stageIdRef.current = currentStage.id
+  formDataRef.current = formData
+
+  // Sync progress across parties: single-party steps unlock the next step for everyone;
+  // shared steps (lease / move-in) sync signatures until all parties are done.
+  useEffect(() => {
+    const applicationId = asString(formData.applicationId) || routeId
+    if (!applicationId) return
+
+    let cancelled = false
+
+    function ownSignatureKeys(): string[] {
+      if (user?.role === 'tenant') {
+        return [
+          'signApplicantDone',
+          'signApplicantName',
+          'signApplicantDate',
+          'signApplicantMark',
+          'inspectionTenantSigned',
+        ]
+      }
+      if (user?.role === 'landlord') {
+        return [
+          'signLandlordDone',
+          'signLandlordName',
+          'signLandlordDate',
+          'signLandlordMark',
+          'inspectionLandlordSigned',
+        ]
+      }
+      if (user?.role === 'admin' || user?.role === 'agent') {
+        return [
+          'signAgentDone',
+          'signAgentName',
+          'signAgentDate',
+          'signAgentMark',
+          'inspectionAgentSigned',
+        ]
+      }
+      return []
+    }
+
+    async function refreshProgress() {
+      try {
+        const result = await fetchApplication(applicationId!)
+        if (cancelled) return
+        const remoteForm = (result.data.formData ?? {}) as Record<string, unknown>
+        const stages = (result.data.completedStages ?? []) as string[]
+        const remoteCompleted = new Set(stages.filter(Boolean) as StageId[])
+        const ownKeys = ownSignatureKeys()
+        const currentMode = modeRef.current
+        const stageId = stageIdRef.current
+        const pullingForm =
+          currentMode === 'waiting' ||
+          currentMode === 'observing' ||
+          stageId === 'lease' ||
+          stageId === 'movein'
+
+        const prevForm = formDataRef.current
+        const mergedForActive: Record<string, unknown> = {
+          ...prevForm,
+          ...remoteForm,
+          applicationId,
+        }
+        for (const key of ownKeys) {
+          const local = prevForm[key]
+          const remote = remoteForm[key]
+          if (key.endsWith('Done') || key.endsWith('Signed')) {
+            mergedForActive[key] = local === true || remote === true || remote === 'true'
+          } else if (local !== undefined && local !== '') {
+            mergedForActive[key] = local
+          }
+        }
+        for (const key of [
+          'signApplicantDone',
+          'signLandlordDone',
+          'signAgentDone',
+          'inspectionTenantSigned',
+          'inspectionLandlordSigned',
+          'inspectionAgentSigned',
+          'leaseNextTenant',
+          'leaseNextLandlord',
+          'leaseNextAgent',
+          'moveinNextTenant',
+          'moveinNextLandlord',
+          'moveinNextAgent',
+        ] as const) {
+          mergedForActive[key] =
+            prevForm[key] === true ||
+            remoteForm[key] === true ||
+            remoteForm[key] === 'true'
+        }
+
+        if (pullingForm) {
+          setFormData(mergedForActive)
+        }
+
+        // Shared steps complete only when every party clicked Next/Complete
+        if (
+          (stageId === 'lease' || stageId === 'movein') &&
+          pendingAdvanceForStage(stageId, mergedForActive).length === 0
+        ) {
+          remoteCompleted.add(stageId)
+        }
+
+        setCompleted(remoteCompleted)
+        const nextActive = activeStageIndex(remoteCompleted, mergedForActive)
+
+        setCurrentIndex((prev) => {
+          const onShared = stageId === 'lease' || stageId === 'movein'
+          // Single-party steps: auto-load the next active step for waiting parties
+          if (!onShared && prev < nextActive) return nextActive
+          if (currentMode === 'waiting' && !onShared && prev !== nextActive) {
+            return nextActive
+          }
+          // Shared steps: only move forward after ALL parties clicked Next/Complete
+          if (
+            onShared &&
+            pendingAdvanceForStage(stageId, mergedForActive).length === 0 &&
+            prev < nextActive
+          ) {
+            return nextActive
+          }
+          if (
+            currentMode === 'observing' &&
+            onShared &&
+            pendingAdvanceForStage(stageId, mergedForActive).length === 0 &&
+            prev !== nextActive
+          ) {
+            return nextActive
+          }
+          return prev
+        })
+      } catch {
+        // ignore transient poll errors
+      }
+    }
+
+    void refreshProgress()
+    const timer = window.setInterval(() => void refreshProgress(), 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [routeId, formData.applicationId, user?.role])
+
+  // When all parties have clicked Next/Complete, mark the shared stage completed
+  useEffect(() => {
+    if (!isSharedStep) return
+    if (advancePending.length > 0) return
+    if (completed.has(currentStage.id)) return
+    setCompleted((prev) => new Set(prev).add(currentStage.id))
+  }, [isSharedStep, advancePending.length, completed, currentStage.id])
 
   useEffect(() => {
     if (!routeId) {
@@ -119,7 +332,7 @@ export default function ApplicationPage() {
         const form = (data.formData ?? {}) as Record<string, unknown>
         const stages = (data.completedStages ?? []) as string[]
         const nextForm = {
-          ...createInitialFormData(),
+          ...createInitialFormData(user),
           ...form,
           applicationId: String(data.id),
           applicantName: form.applicantName ?? data.applicant_name ?? data.applicantName,
@@ -127,7 +340,10 @@ export default function ApplicationPage() {
           applicantPhone: form.applicantPhone ?? data.applicant_phone ?? data.applicantPhone,
           apartmentId: form.apartmentId ?? data.apartment_id ?? data.apartmentId,
         }
-        const nextCompleted = new Set(stages.filter(Boolean) as StageId[])
+        const validIds = new Set(STAGES.map((s) => s.id))
+        const nextCompleted = new Set(
+          stages.filter((s): s is StageId => validIds.has(s as StageId)),
+        )
         setFormData(nextForm)
         setCompleted(nextCompleted)
         setCurrentIndex(activeStageIndex(nextCompleted, nextForm))
@@ -200,16 +416,11 @@ export default function ApplicationPage() {
         return 'Both consent checkboxes are required before continuing.'
       }
     }
-    if (currentStage.id === 'lease') {
-      const pending = pendingPartiesForStage('lease', formData)
-      if (pending.length > 0) {
-        return `Lease signing is incomplete. Still waiting on ${formatPartyList(pending)}.`
-      }
-    }
-    if (currentStage.id === 'movein') {
-      const pending = pendingPartiesForStage('movein', formData)
-      if (pending.length > 0) {
-        return `Move-in inspection is incomplete. Still waiting on ${formatPartyList(pending)}.`
+    if (currentStage.id === 'lease' || currentStage.id === 'movein') {
+      if (!partyHasSigned(currentStage.id, formData, user?.role)) {
+        return currentStage.id === 'lease'
+          ? 'Complete your signature (full name, date, typed signature, and confirm checkbox) before continuing.'
+          : 'Confirm your move-in sign-off checkbox before clicking Next.'
       }
     }
     return null
@@ -232,15 +443,123 @@ export default function ApplicationPage() {
     })
   }
 
+  async function finaliseTenancy(
+    applicationId: string,
+    nextForm: Record<string, unknown>,
+    nextCompleted: Set<StageId>,
+  ) {
+    if (assignedTenantId || !isAgent) return
+    const apartmentId = asString(nextForm.apartmentId)
+    if (!apartmentId) return
+
+    const tenant = await completeApplication({
+      apartmentId,
+      applicationId,
+      name: asString(nextForm.applicantName),
+      email: asString(nextForm.applicantEmail),
+      phone: asString(nextForm.applicantPhone),
+      leaseStart: asString(nextForm.moveInDate) || asString(nextForm.leaseStartDate),
+      leaseEnd: asString(nextForm.termEndDate) || asString(nextForm.leaseEndDate),
+      agentName: asString(nextForm.agentName),
+      moveInSummary: asString(nextForm.inspectionNotes) || undefined,
+    })
+    if (!tenant) return
+
+    setAssignedTenantId(tenant.id)
+    setFormData((prev) => ({ ...prev, tenantId: tenant.id }))
+    await patchApplication(applicationId, {
+      status: 'tenant',
+      completenessPct: 100,
+      formData: { ...nextForm, tenantId: tenant.id },
+      completedStages: Array.from(nextCompleted),
+    })
+
+    const creditScore = Number(asString(nextForm.creditScore))
+    const grossSalary = Number(asString(nextForm.grossSalary || nextForm.incomeGross))
+    const targetRent = Number(asString(nextForm.targetRent || nextForm.rentAmount))
+    let band: 'green' | 'amber' | 'red' = 'amber'
+    const rec = asString(nextForm.creditRecommendation).toLowerCase()
+    if (
+      rec.includes('decline') ||
+      rec.includes('reject') ||
+      asString(nextForm.kycStatus).toLowerCase() === 'fail'
+    ) {
+      band = 'red'
+    } else if (
+      rec.includes('approve') ||
+      asString(nextForm.kycStatus).toLowerCase() === 'pass'
+    ) {
+      band = 'green'
+    }
+
+    await saveApplicationScreening(applicationId, {
+      enquiryType: 'kyc_credit',
+      status: 'completed',
+      providerRef: asString(nextForm.kycRef) || null,
+      summary: {
+        kycStatus: asString(nextForm.kycStatus),
+        kycIdType: asString(nextForm.kycIdType),
+        kycDate: asString(nextForm.kycDate),
+        kycSummary: asString(nextForm.kycSummary),
+        creditScore: asString(nextForm.creditScore),
+        creditPullDate: asString(nextForm.creditPullDate),
+        creditRecommendation: asString(nextForm.creditRecommendation),
+        agentApproval: asString(nextForm.agentApproval),
+      },
+      affordability: {
+        band,
+        score: Number.isFinite(creditScore) ? creditScore : null,
+        reasons: [asString(nextForm.kycSummary)].filter(Boolean),
+      },
+      income: {
+        grossSalary: Number.isFinite(grossSalary) ? grossSalary : null,
+        targetRent: Number.isFinite(targetRent) ? targetRent : null,
+      },
+      linkTenantId: tenant.id,
+    }).catch(() => {})
+  }
+
   async function savePartialProgress() {
     setError(null)
-    if (!editable) return
+    if (!editable && mode !== 'observing') return
     setSaving(true)
     try {
       const applicationId = await ensureApplication(formData)
-      const nextForm = { ...formData, applicationId }
-      await persistProgress(applicationId, completed, nextForm, currentStage.id)
-      setFormData(nextForm)
+      const nextForm: Record<string, unknown> = { ...formData, applicationId }
+      const saved = await patchApplication(applicationId, {
+        status: STAGE_STATUS[currentStage.id] ?? 'in_progress',
+        formData: nextForm,
+        completedStages: Array.from(completed),
+      })
+      const remoteForm = (saved.data.formData ?? nextForm) as Record<string, unknown>
+      const mergedForm: Record<string, unknown> = {
+        ...nextForm,
+        ...remoteForm,
+        applicationId,
+      }
+      for (const key of [
+        'signApplicantDone',
+        'signLandlordDone',
+        'signAgentDone',
+        'inspectionTenantSigned',
+        'inspectionLandlordSigned',
+        'inspectionAgentSigned',
+        'leaseNextTenant',
+        'leaseNextLandlord',
+        'leaseNextAgent',
+        'moveinNextTenant',
+        'moveinNextLandlord',
+        'moveinNextAgent',
+      ] as const) {
+        if (nextForm[key] === true || remoteForm[key] === true || remoteForm[key] === 'true') {
+          mergedForm[key] = true
+        }
+      }
+      setFormData(mergedForm)
+      if (Array.isArray(saved.data.completedStages)) {
+        setCompleted(new Set(saved.data.completedStages as StageId[]))
+      }
+      setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save progress')
     } finally {
@@ -260,112 +579,74 @@ export default function ApplicationPage() {
       return
     }
 
-    if (mode === 'view' && !isActiveStep) {
-      // Reviewing a completed step — jump back to the active pending step
+    // Shared step: already clicked Next — wait for the other parties (no auto jump from button)
+    if (mode === 'observing' && isSharedStep) {
+      if (advancePending.length === 0) {
+        setCurrentIndex(Math.min(STAGES.length - 1, activeIndex))
+        return
+      }
+      setError(`Waiting on ${formatPartyList(advancePending)} to click Next.`)
+      return
+    }
+
+    if (mode === 'view' && !isActiveStep && !stageComplete) {
       setCurrentIndex(activeIndex)
+      return
+    }
+
+    if (mode === 'view' && stageComplete && !isLast) {
+      setCurrentIndex(Math.min(STAGES.length - 1, activeIndex))
       return
     }
 
     const validationError = validateCurrentStage()
     if (validationError) {
-      // For shared steps, still allow saving my signature without advancing
-      const sharedIncomplete =
-        editable &&
-        (currentStage.id === 'lease' || currentStage.id === 'movein') &&
-        (validationError.startsWith('Lease signing is incomplete') ||
-          validationError.startsWith('Move-in inspection is incomplete'))
-      if (sharedIncomplete) {
-        await savePartialProgress()
-        setError(validationError)
-        return
-      }
       setError(validationError)
       return
     }
 
     setSaving(true)
     try {
-      const nextCompleted = new Set(completed).add(currentStage.id)
-      setCompleted(nextCompleted)
-
       const applicationId = await ensureApplication(formData)
-      const nextForm = { ...formData, applicationId }
+      let nextForm: Record<string, unknown> = { ...formData, applicationId }
+      let nextCompleted = new Set(completed)
+
+      if (sharedStageId) {
+        // Record this party's Next/Complete click; stage unlocks only when all three have.
+        nextForm = markPartyAdvanced(sharedStageId, nextForm, user?.role)
+        const stillPending = pendingAdvanceForStage(sharedStageId, nextForm)
+        if (stillPending.length === 0) {
+          nextCompleted.add(currentStage.id)
+        }
+      } else {
+        nextCompleted.add(currentStage.id)
+      }
+
+      setFormData(nextForm)
+      setCompleted(nextCompleted)
       await persistProgress(applicationId, nextCompleted, nextForm, currentStage.id)
 
-      if (isLast) {
-        if (!assignedTenantId && isAgent) {
-          const apartmentId = asString(formData.apartmentId)
-          if (apartmentId) {
-            const tenant = await completeApplication({
-              apartmentId,
-              name: asString(formData.applicantName),
-              email: asString(formData.applicantEmail),
-              phone: asString(formData.applicantPhone),
-              leaseStart:
-                asString(formData.moveInDate) || asString(formData.leaseStartDate),
-              leaseEnd:
-                asString(formData.termEndDate) || asString(formData.leaseEndDate),
-              agentName: asString(formData.agentName),
-              moveInSummary: asString(formData.inspectionNotes) || undefined,
-            })
-            if (tenant) {
-              setAssignedTenantId(tenant.id)
-              setFormData((prev) => ({ ...prev, tenantId: tenant.id }))
-              await patchApplication(applicationId, {
-                status: 'tenant',
-                completenessPct: 100,
-                formData: { ...nextForm, tenantId: tenant.id },
-                completedStages: Array.from(nextCompleted),
-              })
+      if (sharedStageId) {
+        const stillPending = pendingAdvanceForStage(sharedStageId, nextForm)
+        if (stillPending.length > 0) {
+          setError(
+            `Saved. Waiting on ${formatPartyList(stillPending)} to click Next.`,
+          )
+          return
+        }
 
-              const creditScore = Number(asString(formData.creditScore))
-              const grossSalary = Number(
-                asString(formData.grossSalary || formData.incomeGross),
-              )
-              const targetRent = Number(asString(formData.targetRent || formData.rentAmount))
-              let band: 'green' | 'amber' | 'red' = 'amber'
-              const rec = asString(formData.creditRecommendation).toLowerCase()
-              if (
-                rec.includes('decline') ||
-                rec.includes('reject') ||
-                asString(formData.kycStatus).toLowerCase() === 'fail'
-              ) {
-                band = 'red'
-              } else if (
-                rec.includes('approve') ||
-                asString(formData.kycStatus).toLowerCase() === 'pass'
-              ) {
-                band = 'green'
-              }
-
-              await saveApplicationScreening(applicationId, {
-                enquiryType: 'kyc_credit',
-                status: 'completed',
-                providerRef: asString(formData.kycRef) || null,
-                summary: {
-                  kycStatus: asString(formData.kycStatus),
-                  kycIdType: asString(formData.kycIdType),
-                  kycDate: asString(formData.kycDate),
-                  kycSummary: asString(formData.kycSummary),
-                  creditScore: asString(formData.creditScore),
-                  creditPullDate: asString(formData.creditPullDate),
-                  creditRecommendation: asString(formData.creditRecommendation),
-                  agentApproval: asString(formData.agentApproval),
-                },
-                affordability: {
-                  band,
-                  score: Number.isFinite(creditScore) ? creditScore : null,
-                  reasons: [asString(formData.kycSummary)].filter(Boolean),
-                },
-                income: {
-                  grossSalary: Number.isFinite(grossSalary) ? grossSalary : null,
-                  targetRent: Number.isFinite(targetRent) ? targetRent : null,
-                },
-                linkTenantId: tenant.id,
-              }).catch(() => {})
-            }
+        // All parties clicked Next on move-in — finalise tenancy, then open success for all.
+        if (sharedStageId === 'movein') {
+          nextCompleted.add('success')
+          setCompleted(nextCompleted)
+          if (!assignedTenantId && isAgent) {
+            await finaliseTenancy(applicationId, nextForm, nextCompleted)
+          } else {
+            await persistProgress(applicationId, nextCompleted, nextForm, 'success')
           }
         }
+
+        setCurrentIndex((i) => Math.min(STAGES.length - 1, i + 1))
         return
       }
 
@@ -409,16 +690,16 @@ export default function ApplicationPage() {
     setCurrentIndex(index)
   }
 
-  function startOver() {
-    if (!isAgent) return
-    setCompleted(new Set())
-    setCurrentIndex(0)
-    setFormData(createInitialFormData())
-    setAssignedTenantId(null)
-    setInviteUrl(null)
-    setError(null)
-    navigate('/apply', { replace: true })
-  }
+  // If an agent reaches success after another party clicked the last move-in Next, finalise.
+  useEffect(() => {
+    if (currentStage.id !== 'success') return
+    if (!isAgent || assignedTenantId) return
+    const applicationId = asString(formData.applicationId) || routeId
+    if (!applicationId) return
+    if (pendingAdvanceForStage('movein', formData).length > 0) return
+    void finaliseTenancy(applicationId, formData, new Set(completed).add('success'))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStage.id, isAgent, assignedTenantId, formData.applicationId, routeId])
 
   if (loading) {
     return (
@@ -430,15 +711,13 @@ export default function ApplicationPage() {
 
   const nextLabel = (() => {
     if (saving) return 'Saving…'
-    if (allComplete && isLast) return 'Complete application'
+    if (isSuccessStep) return 'Go to Dashboard'
     if (mode === 'waiting') return 'Waiting…'
-    if (mode === 'view' && !isActiveStep) return 'Go to current step'
-    if (currentStage.id === 'lease' || currentStage.id === 'movein') {
-      const pending = pendingPartiesForStage(currentStage.id, formData)
-      if (pending.length > 0) return 'Save my progress'
-      return isLast ? 'Complete application' : 'Next'
+    if (mode === 'observing' && isSharedStep) {
+      return advancePending.length === 0 ? 'Continue to next step' : 'Waiting for others…'
     }
-    return isLast ? 'Complete application' : 'Next'
+    if (mode === 'view' && !isActiveStep) return 'Go to current step'
+    return 'Next'
   })()
 
   return (
@@ -502,17 +781,6 @@ export default function ApplicationPage() {
       />
 
       <main className="stage-main">
-        {allComplete && isLast ? (
-          <div className="completion-banner">
-            <h2>Application journey complete</h2>
-            <p>
-              {assignedTenantId
-                ? 'The selected unit has been updated with this tenant.'
-                : 'All timeline stops have been reviewed.'}
-            </p>
-          </div>
-        ) : null}
-
         <StagePanel
           stage={currentStage}
           formData={formData}
@@ -523,46 +791,60 @@ export default function ApplicationPage() {
           isActiveStep={isActiveStep}
         />
 
-        <div className="stage-actions">
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={currentIndex === 0 || saving}
-            onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
-          >
-            Back
-          </button>
-
-          {isAgent && asString(formData.applicationId) ? (
-            <button type="button" className="btn btn-ghost" onClick={() => void reinviteApplicant()}>
-              Copy applicant invite
-            </button>
-          ) : null}
-
-          {editable && (currentStage.id === 'lease' || currentStage.id === 'movein') ? (
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={saving}
-              onClick={() => void savePartialProgress()}
-            >
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-          ) : null}
-
-          {allComplete && isLast && isAgent ? (
-            <button type="button" className="btn btn-primary" onClick={startOver}>
-              Start over
-            </button>
-          ) : (
+        <div className={`stage-actions${isSuccessStep ? ' stage-actions-success' : ''}`}>
+          {isSuccessStep ? (
             <button
               type="button"
               className="btn btn-primary"
-              disabled={saving || mode === 'waiting'}
-              onClick={() => void goNext()}
+              onClick={() => navigate(homePathForRole(user))}
             >
-              {nextLabel}
+              Go to Dashboard
             </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={currentIndex === 0 || saving}
+                onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
+              >
+                Back
+              </button>
+
+              {isAgent && asString(formData.applicationId) ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  onClick={() => void reinviteApplicant()}
+                >
+                  Copy applicant invite
+                </button>
+              ) : null}
+
+              {editable && (currentStage.id === 'lease' || currentStage.id === 'movein') ? (
+                <button
+                  type="button"
+                  className="btn btn-ghost"
+                  disabled={saving}
+                  onClick={() => void savePartialProgress()}
+                >
+                  {saving ? 'Saving…' : 'Save'}
+                </button>
+              ) : null}
+
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={
+                  saving ||
+                  mode === 'waiting' ||
+                  (mode === 'observing' && isSharedStep && advancePending.length > 0)
+                }
+                onClick={() => void goNext()}
+              >
+                {nextLabel}
+              </button>
+            </>
           )}
         </div>
       </main>

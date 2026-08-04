@@ -5,8 +5,8 @@ export type StageId =
   | 'kyc'
   | 'payment'
   | 'lease'
-  | 'completion'
   | 'movein'
+  | 'success'
 
 export type StagePhase = 'intake' | 'review' | 'legal' | 'closing'
 
@@ -100,19 +100,8 @@ export const STAGES: StageDefinition[] = [
     canEdit: ['admin', 'agent', 'tenant', 'landlord'],
   },
   {
-    id: 'completion',
-    number: 7,
-    title: 'Application Complete',
-    shortTitle: 'Complete',
-    description: 'Confirm the rental application process is finished and ready for move-in.',
-    phase: 'closing',
-    editorRole: 'agent',
-    editorLabel: 'Agent / Realtor',
-    canEdit: ['admin', 'agent'],
-  },
-  {
     id: 'movein',
-    number: 8,
+    number: 7,
     title: 'Move-in Inspection',
     shortTitle: 'Move-in',
     description:
@@ -121,6 +110,18 @@ export const STAGES: StageDefinition[] = [
     editorRole: 'shared',
     editorLabel: 'Agent, tenant & landlord',
     canEdit: ['admin', 'agent', 'tenant', 'landlord'],
+  },
+  {
+    id: 'success',
+    number: 8,
+    title: 'Application Successful',
+    shortTitle: 'Success',
+    description:
+      'The rental application is complete. All parties can confirm success and return to their dashboard.',
+    phase: 'closing',
+    editorRole: 'shared',
+    editorLabel: 'All parties · view only',
+    canEdit: [],
   },
 ]
 
@@ -149,27 +150,208 @@ export function formatPartyList(roles: PortalRole[]): string {
 }
 
 function bool(data: Record<string, unknown>, key: string) {
-  return data[key] === true
+  const value = data[key]
+  return value === true || value === 'true' || value === 1 || value === '1'
 }
 
-/** Shared steps need every party to finish their part before the stage unlocks the next. */
-export function pendingPartiesForStage(
+export type PartySignStatus = {
+  role: PortalRole
+  label: string
+  done: boolean
+  nameKey: string
+  doneKey: string
+}
+
+export function leaseSignatureStatuses(
+  formData: Record<string, unknown>,
+): PartySignStatus[] {
+  return [
+    {
+      role: 'tenant',
+      label: 'Tenant',
+      done: bool(formData, 'signApplicantDone'),
+      nameKey: 'signApplicantName',
+      doneKey: 'signApplicantDone',
+    },
+    {
+      role: 'landlord',
+      label: 'Landlord',
+      done: bool(formData, 'signLandlordDone'),
+      nameKey: 'signLandlordName',
+      doneKey: 'signLandlordDone',
+    },
+    {
+      role: 'agent',
+      label: 'Agent',
+      done: bool(formData, 'signAgentDone'),
+      nameKey: 'signAgentName',
+      doneKey: 'signAgentDone',
+    },
+  ]
+}
+
+export function moveInSignStatuses(
+  formData: Record<string, unknown>,
+): PartySignStatus[] {
+  return [
+    {
+      role: 'tenant',
+      label: 'Tenant',
+      done: bool(formData, 'inspectionTenantSigned'),
+      nameKey: 'inspectionTenantSigned',
+      doneKey: 'inspectionTenantSigned',
+    },
+    {
+      role: 'landlord',
+      label: 'Landlord',
+      done: bool(formData, 'inspectionLandlordSigned'),
+      nameKey: 'inspectionLandlordSigned',
+      doneKey: 'inspectionLandlordSigned',
+    },
+    {
+      role: 'agent',
+      label: 'Agent',
+      done: bool(formData, 'inspectionAgentSigned'),
+      nameKey: 'inspectionAgentSigned',
+      doneKey: 'inspectionAgentSigned',
+    },
+  ]
+}
+
+/** Normalize admin → agent for shared-step party keys. */
+export function sharedPartyRole(role: PortalRole | undefined): 'tenant' | 'landlord' | 'agent' | null {
+  if (!role) return null
+  if (role === 'tenant') return 'tenant'
+  if (role === 'landlord') return 'landlord'
+  if (role === 'admin' || role === 'agent') return 'agent'
+  return null
+}
+
+function advanceKeyFor(
+  stageId: 'lease' | 'movein',
+  party: 'tenant' | 'landlord' | 'agent',
+): string {
+  if (stageId === 'lease') {
+    if (party === 'tenant') return 'leaseNextTenant'
+    if (party === 'landlord') return 'leaseNextLandlord'
+    return 'leaseNextAgent'
+  }
+  if (party === 'tenant') return 'moveinNextTenant'
+  if (party === 'landlord') return 'moveinNextLandlord'
+  return 'moveinNextAgent'
+}
+
+export function partyHasSigned(
+  stageId: 'lease' | 'movein',
+  formData: Record<string, unknown>,
+  role: PortalRole | undefined,
+): boolean {
+  const party = sharedPartyRole(role)
+  if (!party) return false
+  if (stageId === 'lease') {
+    if (party === 'tenant') {
+      return (
+        bool(formData, 'signApplicantDone') &&
+        Boolean(String(formData.signApplicantName ?? '').trim()) &&
+        Boolean(String(formData.signApplicantDate ?? '').trim()) &&
+        Boolean(String(formData.signApplicantMark ?? '').trim())
+      )
+    }
+    if (party === 'landlord') {
+      return (
+        bool(formData, 'signLandlordDone') &&
+        Boolean(String(formData.signLandlordName ?? '').trim()) &&
+        Boolean(String(formData.signLandlordDate ?? '').trim()) &&
+        Boolean(String(formData.signLandlordMark ?? '').trim())
+      )
+    }
+    return (
+      bool(formData, 'signAgentDone') &&
+      Boolean(String(formData.signAgentName ?? '').trim()) &&
+      Boolean(String(formData.signAgentDate ?? '').trim()) &&
+      Boolean(String(formData.signAgentMark ?? '').trim())
+    )
+  }
+  if (party === 'tenant') return bool(formData, 'inspectionTenantSigned')
+  if (party === 'landlord') return bool(formData, 'inspectionLandlordSigned')
+  return bool(formData, 'inspectionAgentSigned')
+}
+
+export function partyHasAdvanced(
+  stageId: 'lease' | 'movein',
+  formData: Record<string, unknown>,
+  role: PortalRole | undefined,
+): boolean {
+  const party = sharedPartyRole(role)
+  if (!party) return false
+  return bool(formData, advanceKeyFor(stageId, party))
+}
+
+/** Mark that this party clicked Next / Complete after signing. */
+export function markPartyAdvanced(
+  stageId: 'lease' | 'movein',
+  formData: Record<string, unknown>,
+  role: PortalRole | undefined,
+): Record<string, unknown> {
+  const party = sharedPartyRole(role)
+  if (!party) return formData
+  return { ...formData, [advanceKeyFor(stageId, party)]: true }
+}
+
+/** Parties that still need to complete their signature block. */
+export function pendingSignaturesForStage(
   stageId: StageId,
   formData: Record<string, unknown>,
 ): PortalRole[] {
   if (stageId === 'lease') {
     const pending: PortalRole[] = []
-    if (!bool(formData, 'signApplicantDone')) pending.push('tenant')
-    if (!bool(formData, 'signLandlordDone')) pending.push('landlord')
-    if (!bool(formData, 'signAgentDone')) pending.push('agent')
+    if (!partyHasSigned('lease', formData, 'tenant')) pending.push('tenant')
+    if (!partyHasSigned('lease', formData, 'landlord')) pending.push('landlord')
+    if (!partyHasSigned('lease', formData, 'agent')) pending.push('agent')
     return pending
   }
   if (stageId === 'movein') {
     const pending: PortalRole[] = []
-    if (!bool(formData, 'inspectionTenantSigned')) pending.push('tenant')
-    if (!bool(formData, 'inspectionLandlordSigned')) pending.push('landlord')
-    if (!bool(formData, 'inspectionAgentSigned')) pending.push('agent')
+    if (!partyHasSigned('movein', formData, 'tenant')) pending.push('tenant')
+    if (!partyHasSigned('movein', formData, 'landlord')) pending.push('landlord')
+    if (!partyHasSigned('movein', formData, 'agent')) pending.push('agent')
     return pending
+  }
+  return []
+}
+
+/**
+ * Parties that still need to click Next (step 6) or Complete (step 8).
+ * Stage unlocks only after every party has advanced — not merely signed.
+ */
+export function pendingAdvanceForStage(
+  stageId: StageId,
+  formData: Record<string, unknown>,
+): PortalRole[] {
+  if (stageId === 'lease') {
+    const pending: PortalRole[] = []
+    if (!partyHasAdvanced('lease', formData, 'tenant')) pending.push('tenant')
+    if (!partyHasAdvanced('lease', formData, 'landlord')) pending.push('landlord')
+    if (!partyHasAdvanced('lease', formData, 'agent')) pending.push('agent')
+    return pending
+  }
+  if (stageId === 'movein') {
+    const pending: PortalRole[] = []
+    if (!partyHasAdvanced('movein', formData, 'tenant')) pending.push('tenant')
+    if (!partyHasAdvanced('movein', formData, 'landlord')) pending.push('landlord')
+    if (!partyHasAdvanced('movein', formData, 'agent')) pending.push('agent')
+    return pending
+  }
+  return []
+}
+
+/** @deprecated Prefer pendingSignaturesForStage / pendingAdvanceForStage. */
+export function pendingPartiesForStage(
+  stageId: StageId,
+  formData: Record<string, unknown>,
+): PortalRole[] {
+  if (stageId === 'lease' || stageId === 'movein') {
+    return pendingAdvanceForStage(stageId, formData)
   }
   const stage = STAGES.find((s) => s.id === stageId)
   return stage ? [...stage.canEdit.filter((r) => r !== 'admin')] : []
@@ -181,7 +363,12 @@ export function isStageFullyComplete(
   formData: Record<string, unknown>,
 ): boolean {
   if (stageId === 'lease' || stageId === 'movein') {
-    return pendingPartiesForStage(stageId, formData).length === 0
+    // All parties must sign and click Next — not signature-only.
+    return pendingAdvanceForStage(stageId, formData).length === 0
+  }
+  if (stageId === 'success') {
+    // Success is reached once move-in is finished by all parties.
+    return pendingAdvanceForStage('movein', formData).length === 0
   }
   return completed.has(stageId)
 }
@@ -212,7 +399,10 @@ export function progressHolders(
   if (index === -1) return null
   const stage = STAGES[index]
   if (stage.id === 'lease' || stage.id === 'movein') {
-    return { stage, waitingOn: pendingPartiesForStage(stage.id, formData) }
+    return { stage, waitingOn: pendingAdvanceForStage(stage.id, formData) }
+  }
+  if (stage.id === 'success') {
+    return null
   }
   return {
     stage,

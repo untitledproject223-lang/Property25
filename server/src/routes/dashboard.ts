@@ -27,8 +27,11 @@ dashboardRouter.get('/', async (req, res, next) => {
             lease_start AS "leaseStart", lease_end AS "leaseEnd", status,
             balance::float8 AS balance, docs_json AS docs,
             move_in_inspection_json AS "moveInInspection",
-            user_id AS "userId"
-          FROM tenants WHERE org_id = ${orgId}
+            user_id AS "userId",
+            application_id AS "applicationId"
+          FROM tenants
+          WHERE org_id = ${orgId}
+            AND application_id IS NOT NULL
           ORDER BY name
         `,
         sql`
@@ -40,7 +43,8 @@ dashboardRouter.get('/', async (req, res, next) => {
         sql`
           SELECT id, tenant_id AS "tenantId", issued_at AS "issuedAt", due_date AS "dueDate",
             items_json AS items, total::float8 AS total, status, notes,
-            is_recurring AS "isRecurring", billing_kind AS "billingKind"
+            is_recurring AS "isRecurring", billing_kind AS "billingKind",
+            issue_id AS "issueId"
           FROM invoices WHERE org_id = ${orgId}
           ORDER BY issued_at DESC
         `,

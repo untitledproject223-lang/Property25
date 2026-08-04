@@ -66,6 +66,22 @@ function mapIssue(row: Record<string, unknown>) {
   }
 }
 
+function managementOwnerOf(row: Record<string, unknown>) {
+  return String(row.management_owner ?? row.managementOwner ?? 'landlord')
+}
+
+function canDecideTicket(auth: AuthTokenPayload, managementOwner: string) {
+  if (auth.role === 'admin') return true
+  if (managementOwner === 'landlord' && auth.role === 'landlord') return true
+  if (managementOwner === 'agent' && auth.role === 'agent') return true
+  return false
+}
+
+function isTicketAccepted(decision: Record<string, unknown>) {
+  const outcome = String(decision.outcome ?? '')
+  return outcome === 'accept' || outcome === 'conditional'
+}
+
 issuesRouter.get('/', async (req, res, next) => {
   try {
     const auth = req.auth!
@@ -249,6 +265,12 @@ issuesRouter.patch('/:id', async (req, res, next) => {
           })
           .optional(),
         decision: decisionSchema.optional(),
+        close: z
+          .object({
+            result: z.enum(['successful', 'unsuccessful']),
+            note: z.string().max(2000).optional(),
+          })
+          .optional(),
       })
       .parse(req.body)
 
@@ -265,8 +287,20 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       existing.decision_json && typeof existing.decision_json === 'object'
         ? { ...(existing.decision_json as Record<string, unknown>) }
         : {}
+    const managementOwner = managementOwnerOf(existing as Record<string, unknown>)
+    const issueType = String(existing.issue_type ?? 'general')
+    const existingStatus = String(existing.status)
 
     if (body.reply) {
+      if (existingStatus === 'resolved' || existingStatus === 'rejected') {
+        throw new AppError(400, 'This ticket is closed')
+      }
+      if (!isTicketAccepted(decision)) {
+        throw new AppError(
+          400,
+          'This ticket must be accepted before correspondence can begin',
+        )
+      }
       const author =
         body.reply.author ??
         (auth.role === 'tenant'
@@ -284,30 +318,46 @@ issuesRouter.patch('/:id', async (req, res, next) => {
     }
 
     if (body.decision) {
-      if (auth.role !== 'landlord' && auth.role !== 'admin' && auth.role !== 'agent') {
-        throw new AppError(403, 'Only landlord or managing agent can decide')
+      if (!canDecideTicket(auth, managementOwner)) {
+        throw new AppError(
+          403,
+          managementOwner === 'agent'
+            ? 'Only the managing agent can accept or reject this ticket'
+            : 'Only the landlord can accept or reject this ticket',
+        )
       }
-      if (String(existing.issue_type) !== 'maintenance') {
-        throw new AppError(400, 'Decisions apply to maintenance issues only')
+      if (decision.outcome) {
+        throw new AppError(400, 'A decision has already been recorded for this ticket')
+      }
+      if (existingStatus === 'resolved' || existingStatus === 'rejected') {
+        throw new AppError(400, 'This ticket is already closed')
       }
 
       const d = body.decision
+      if (d.outcome === 'conditional' && issueType !== 'maintenance') {
+        throw new AppError(400, 'Conditional approval applies to maintenance tickets only')
+      }
+
       const materials = d.materialsCost ?? 0
       const labour = d.labourCost ?? 0
+      const decider = auth.role === 'landlord' ? 'landlord' : 'agent'
       decision = {
+        ...decision,
         outcome: d.outcome,
         payer:
           d.outcome === 'accept'
-            ? 'landlord'
+            ? issueType === 'maintenance'
+              ? 'landlord'
+              : undefined
             : d.outcome === 'reject'
               ? undefined
               : (d.payer ?? 'tenant'),
         landlordShare: d.landlordShare,
         tenantShare: d.tenantShare,
         workDescription: d.workDescription,
-        materialsCost: materials,
-        labourCost: labour,
-        totalCost: materials + labour,
+        materialsCost: issueType === 'maintenance' ? materials : undefined,
+        labourCost: issueType === 'maintenance' ? labour : undefined,
+        totalCost: issueType === 'maintenance' ? materials + labour : undefined,
         note: d.note,
         decidedAt: new Date().toISOString(),
         decidedBy: auth.role,
@@ -317,20 +367,28 @@ issuesRouter.patch('/:id', async (req, res, next) => {
         status = 'rejected'
         messages.push({
           id: crypto.randomUUID(),
-          author: auth.role === 'landlord' ? 'landlord' : 'agent',
+          author: decider,
           body:
-            d.note ||
-            'Maintenance request rejected. No work will be carried out under this ticket.',
+            d.note?.trim() ||
+            (issueType === 'maintenance'
+              ? 'Ticket rejected. No work will be carried out under this ticket.'
+              : 'Ticket rejected. No further correspondence will take place on this ticket.'),
           at: new Date().toISOString(),
         })
       } else if (d.outcome === 'accept') {
         status = 'pending'
+        const costNote =
+          issueType === 'maintenance'
+            ? ` Cost will be incurred by the landlord.${
+                d.workDescription ? ` Work: ${d.workDescription}.` : ''
+              } Materials R${materials}, labour R${labour}, total R${materials + labour}.`
+            : d.workDescription
+              ? ` Note: ${d.workDescription}.`
+              : ''
         messages.push({
           id: crypto.randomUUID(),
-          author: auth.role === 'landlord' ? 'landlord' : 'agent',
-          body: `Maintenance accepted. Cost will be incurred by the landlord.${
-            d.workDescription ? ` Work: ${d.workDescription}.` : ''
-          } Materials R${materials}, labour R${labour}, total R${materials + labour}.`,
+          author: decider,
+          body: `Ticket accepted by the ${decider}.${costNote} Correspondence is now open.`,
           at: new Date().toISOString(),
         })
       } else {
@@ -341,13 +399,56 @@ issuesRouter.patch('/:id', async (req, res, next) => {
             : 'tenant'
         messages.push({
           id: crypto.randomUUID(),
-          author: auth.role === 'landlord' ? 'landlord' : 'agent',
-          body: `Maintenance approved conditionally. Payment responsibility: ${payerLabel}.${
+          author: decider,
+          body: `Ticket approved conditionally. Payment responsibility: ${payerLabel}.${
             d.workDescription ? ` Work: ${d.workDescription}.` : ''
-          } Materials R${materials}, labour R${labour}, total R${materials + labour}.`,
+          } Materials R${materials}, labour R${labour}, total R${materials + labour}. Correspondence is now open.`,
           at: new Date().toISOString(),
         })
       }
+    }
+
+    if (body.close) {
+      if (existingStatus === 'resolved' || existingStatus === 'rejected') {
+        throw new AppError(400, 'This ticket is already closed')
+      }
+      if (!isTicketAccepted(decision)) {
+        throw new AppError(400, 'Only an accepted ticket can be closed with an outcome')
+      }
+      const closer =
+        auth.role === 'tenant'
+          ? 'tenant'
+          : auth.role === 'landlord'
+            ? 'landlord'
+            : 'agent'
+      const resultLabel =
+        body.close.result === 'successful' ? 'successful' : 'not successful'
+      decision = {
+        ...decision,
+        closureResult: body.close.result,
+        closedAt: new Date().toISOString(),
+        closedBy: closer,
+        closureNote: body.close.note,
+      }
+      status = 'resolved'
+      messages.push({
+        id: crypto.randomUUID(),
+        author: closer,
+        body:
+          body.close.note?.trim() ||
+          `Ticket closed as ${resultLabel} by the ${closer}.`,
+        at: new Date().toISOString(),
+      })
+    }
+
+    // Prevent resolving via status without an acceptance first
+    if (
+      body.status === 'resolved' &&
+      !body.close &&
+      !isTicketAccepted(decision) &&
+      String(existing.status) !== 'resolved'
+    ) {
+      throw new AppError(400, 'Accept the ticket before closing it')
     }
 
     const rows = await sql`

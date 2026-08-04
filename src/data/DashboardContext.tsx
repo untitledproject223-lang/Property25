@@ -117,6 +117,7 @@ interface CreateInvoiceInput {
   status?: InvoiceStatus
   billingKind?: InvoiceBillingKind
   isRecurring?: boolean
+  issueId?: string
 }
 
 interface AddPaymentInput {
@@ -154,6 +155,7 @@ export interface LandlordInput {
 
 export interface CompleteApplicationInput {
   apartmentId: string
+  applicationId?: string
   name: string
   email: string
   phone: string
@@ -240,7 +242,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void refresh()
-  }, [refresh])
+    const onFocus = () => {
+      if (user?.role === 'admin' || user?.role === 'agent') void refresh()
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refresh, user?.role])
 
   const createInvoice = useCallback(
     async (input: CreateInvoiceInput) => {
@@ -250,10 +257,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         tenantId: input.tenantId,
         dueDate: input.dueDate,
         items: input.items,
-        status: input.status ?? 'draft',
+        status: input.status ?? 'sent',
         notes: input.notes,
         billingKind,
         isRecurring: billingKind === 'recurring',
+        issueId: input.issueId,
       })
       await refresh()
       const row = result.data
@@ -264,11 +272,12 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         dueDate: String(row.dueDate ?? input.dueDate).slice(0, 10),
         items: (row.items as InvoiceItem[]) ?? input.items,
         total: Number(row.total ?? 0),
-        status: (row.status as InvoiceStatus) ?? input.status ?? 'draft',
+        status: (row.status as InvoiceStatus) ?? input.status ?? 'sent',
         notes: (row.notes as string | undefined) ?? input.notes,
         isRecurring: Boolean(row.isRecurring ?? billingKind === 'recurring'),
         billingKind:
           (row.billingKind as InvoiceBillingKind | undefined) ?? billingKind,
+        issueId: (row.issueId as string | null | undefined) ?? input.issueId ?? null,
       }
     },
     [refresh],
@@ -475,6 +484,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
       const result = await createTenant({
         apartmentId: input.apartmentId,
+        applicationId: input.applicationId,
         name: input.name.trim() || 'New tenant',
         email: input.email.trim() || 'tenant@example.com',
         phone: input.phone.trim() || '0000000000',

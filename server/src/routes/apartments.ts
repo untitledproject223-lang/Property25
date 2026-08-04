@@ -121,7 +121,8 @@ apartmentsRouter.get('/:id/history', async (req, res, next) => {
         i.id, i.tenant_id AS "tenantId", i.issued_at AS "issuedAt",
         i.due_date AS "dueDate", i.items_json AS items, i.total::float8 AS total,
         i.status, i.notes,
-        i.is_recurring AS "isRecurring", i.billing_kind AS "billingKind"
+        i.is_recurring AS "isRecurring", i.billing_kind AS "billingKind",
+        i.issue_id AS "issueId"
       FROM invoices i
       JOIN tenants t ON t.id = i.tenant_id
       WHERE i.org_id = ${req.orgId!} AND t.apartment_id = ${id}

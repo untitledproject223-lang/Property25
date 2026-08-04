@@ -140,6 +140,7 @@ export async function deleteApartment(id: string) {
 
 export async function createTenant(input: {
   apartmentId: string
+  applicationId?: string | null
   name: string
   email: string
   phone: string
@@ -171,11 +172,40 @@ export async function createInvoice(input: {
   notes?: string
   billingKind?: 'recurring' | 'one_time'
   isRecurring?: boolean
+  issueId?: string
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/invoices', {
     method: 'POST',
     body: input,
   })
+}
+
+export async function fetchInvoice(id: string) {
+  return apiRequest<{
+    data: {
+      id: string
+      tenantId: string
+      issuedAt: string
+      dueDate: string
+      items: Array<{ type: string; description: string; amount: number }>
+      total: number
+      status: string
+      notes?: string | null
+      isRecurring?: boolean
+      billingKind?: 'recurring' | 'one_time'
+      issueId?: string | null
+      tenantName: string
+      tenantEmail: string
+      tenantPhone: string
+      unitNumber: string
+      rent: number
+      deposit: number
+      buildingName: string
+      buildingAddress: string
+      landlordName: string
+      issueSubject?: string | null
+    }
+  }>(`/api/invoices/${id}`)
 }
 
 export async function patchInvoice(id: string, input: { status?: string; notes?: string }) {
@@ -228,6 +258,10 @@ export async function patchIssue(
       workDescription?: string
       materialsCost?: number
       labourCost?: number
+      note?: string
+    }
+    close?: {
+      result: 'successful' | 'unsuccessful'
       note?: string
     }
   },
@@ -308,6 +342,12 @@ export async function patchApplication(
   })
 }
 
+export async function deleteApplication(id: string) {
+  return apiRequest<{ data: { id: string; deleted: boolean } }>(`/api/applications/${id}`, {
+    method: 'DELETE',
+  })
+}
+
 export async function createInvite(input: {
   email: string
   role: 'tenant' | 'landlord'
@@ -360,6 +400,43 @@ export async function fetchTenantProfile() {
   return apiRequest<{ data: Record<string, unknown> }>('/api/portal/tenant/profile')
 }
 
+export async function updateTenantProfile(input: {
+  name?: string
+  phone?: string
+  whatsapp?: string | null
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/portal/tenant/profile', {
+    method: 'PATCH',
+    body: input,
+  })
+}
+
+export async function uploadTenantAvatar(contentBase64: string, mimeType: string) {
+  return apiRequest<{ data: { ok: boolean } }>('/api/portal/tenant/profile/avatar', {
+    method: 'POST',
+    body: { contentBase64, mimeType },
+  })
+}
+
+export async function changePassword(currentPassword: string, newPassword: string) {
+  return apiRequest<{ data: { ok: boolean } }>('/api/auth/change-password', {
+    method: 'POST',
+    body: { currentPassword, newPassword },
+  })
+}
+
+export async function fetchTenantInvoices() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/portal/tenant/invoices')
+}
+
+export async function fetchLandlordInvoices() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/portal/landlord/invoices')
+}
+
+export async function fetchLandlordTenants() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/portal/landlord/tenants')
+}
+
 export async function fetchLandlordPortfolio() {
   return apiRequest<{
     data: {
@@ -377,6 +454,26 @@ export async function setUnitTicketManager(
     `/api/portal/landlord/units/${unitId}/ticket-manager`,
     { method: 'PATCH', body: { ticketManager } },
   )
+}
+
+export async function fetchLandlordBuildings() {
+  return apiRequest<{ data: Array<{ id: string; name: string; address: string }> }>(
+    '/api/portal/landlord/buildings',
+  )
+}
+
+export async function createLandlordUnit(input: {
+  buildingId?: string
+  newBuildingName?: string
+  newBuildingAddress?: string
+  unitNumber: string
+  rent: number
+  deposit: number
+}) {
+  return apiRequest<{ data: Record<string, unknown> }>('/api/portal/landlord/units', {
+    method: 'POST',
+    body: input,
+  })
 }
 
 export async function listIssues() {

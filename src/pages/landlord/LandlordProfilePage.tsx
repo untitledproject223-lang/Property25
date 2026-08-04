@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useAuth } from '../../data/AuthContext'
 
 export default function LandlordProfilePage() {
@@ -7,8 +8,11 @@ export default function LandlordProfilePage() {
       <header className="page-header">
         <div>
           <h1>Profile</h1>
-          <p>Your landlord account.</p>
+          <p>Your landlord account and unit management shortcuts.</p>
         </div>
+        <Link to="/landlord/units?add=1" className="btn btn-primary btn-compact">
+          Add unit
+        </Link>
       </header>
       <dl className="banking-details">
         <div>
@@ -24,6 +28,11 @@ export default function LandlordProfilePage() {
           <dd>{user?.org.name}</dd>
         </div>
       </dl>
+      <p style={{ marginTop: '1.25rem' }}>
+        <Link to="/landlord/units" className="btn btn-ghost btn-compact">
+          View my units
+        </Link>
+      </p>
     </div>
   )
 }

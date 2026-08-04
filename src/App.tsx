@@ -9,7 +9,6 @@ import TenantsPage from './pages/TenantsPage'
 import TenantDetailPage from './pages/TenantDetailPage'
 import PaymentsPage from './pages/PaymentsPage'
 import InvoicesPage from './pages/InvoicesPage'
-import IssuesPage from './pages/IssuesPage'
 import LandlordsPage from './pages/LandlordsPage'
 import UnitsPage from './pages/UnitsPage'
 import UnitDetailPage from './pages/UnitDetailPage'
@@ -21,10 +20,15 @@ import TenantApplicationsPage from './pages/tenant/TenantApplicationsPage'
 import TenantStaysPage from './pages/tenant/TenantStaysPage'
 import TenantStayDetailPage from './pages/tenant/TenantStayDetailPage'
 import TenantProfilePage from './pages/tenant/TenantProfilePage'
+import TenantInvoicesPage from './pages/tenant/TenantInvoicesPage'
 import LandlordPortfolioPage from './pages/landlord/LandlordPortfolioPage'
+import LandlordInvoicesPage from './pages/landlord/LandlordInvoicesPage'
 import LandlordApplicationsPage from './pages/landlord/LandlordApplicationsPage'
 import LandlordProfilePage from './pages/landlord/LandlordProfilePage'
+import LandlordUnitsPage from './pages/landlord/LandlordUnitsPage'
+import AgentApplicationsPage from './pages/agent/AgentApplicationsPage'
 import IssuesInboxPage from './pages/shared/IssuesInboxPage'
+import InvoiceViewPage from './pages/shared/InvoiceViewPage'
 import './App.css'
 
 function LoadingScreen() {
@@ -88,25 +92,43 @@ export default function App() {
             <Route path="apply/:id" element={<ApplicationPage />} />
 
             <Route element={<AgentOnly />}>
+              <Route
+                path="invoices/:id/view"
+                element={<InvoiceViewPage backTo="/invoices" />}
+              />
               <Route element={<DashboardShell />}>
                 <Route index element={<PortfolioPage />} />
+                <Route path="applications" element={<AgentApplicationsPage />} />
                 <Route path="tenants" element={<TenantsPage />} />
                 <Route path="tenants/:id" element={<TenantDetailPage />} />
                 <Route path="units" element={<UnitsPage />} />
                 <Route path="units/:id" element={<UnitDetailPage />} />
                 <Route path="payments" element={<PaymentsPage />} />
                 <Route path="invoices" element={<InvoicesPage />} />
-                <Route path="issues" element={<IssuesPage />} />
+                <Route
+                  path="issues"
+                  element={
+                    <IssuesInboxPage
+                      title="Tickets"
+                      allowCreate={false}
+                      allowDecision
+                    />
+                  }
+                />
                 <Route path="landlords" element={<LandlordsPage />} />
               </Route>
             </Route>
 
             <Route element={<TenantOnly />}>
+              <Route
+                path="tenant/invoices/:id/view"
+                element={<InvoiceViewPage backTo="/tenant/invoices" />}
+              />
               <Route path="tenant" element={<TenantShell />}>
                 <Route index element={<TenantHomePage />} />
-                <Route path="applications" element={<TenantApplicationsPage />} />
                 <Route path="stays" element={<TenantStaysPage />} />
                 <Route path="stays/:id" element={<TenantStayDetailPage />} />
+                <Route path="invoices" element={<TenantInvoicesPage />} />
                 <Route
                   path="issues"
                   element={
@@ -118,12 +140,19 @@ export default function App() {
                   }
                 />
                 <Route path="profile" element={<TenantProfilePage />} />
+                <Route path="applications" element={<TenantApplicationsPage />} />
               </Route>
             </Route>
 
             <Route element={<LandlordOnly />}>
+              <Route
+                path="landlord/invoices/:id/view"
+                element={<InvoiceViewPage backTo="/landlord/invoices" />}
+              />
               <Route path="landlord" element={<LandlordShell />}>
                 <Route index element={<LandlordPortfolioPage />} />
+                <Route path="units" element={<LandlordUnitsPage />} />
+                <Route path="invoices" element={<LandlordInvoicesPage />} />
                 <Route path="applications" element={<LandlordApplicationsPage />} />
                 <Route
                   path="issues"

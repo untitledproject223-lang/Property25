@@ -94,6 +94,7 @@ export interface Invoice {
   notes?: string
   isRecurring?: boolean
   billingKind?: InvoiceBillingKind
+  issueId?: string | null
 }
 
 export interface IssueMessage {

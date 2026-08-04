@@ -4,6 +4,7 @@ import { useDashboard } from '../../data/DashboardContext'
 import { vacantApartments } from '../../data/unitHelpers'
 import { formatMoney } from '../../data/utils'
 import { fileToBase64, uploadDocument, type AuthRole } from '../../data/api'
+import { leaseSignatureStatuses, moveInSignStatuses } from '../../stages'
 
 /** Default admin / KYC check fee when a unit is selected (ZAR). */
 const DEFAULT_ADMIN_FEE = '350'
@@ -19,7 +20,8 @@ function str(data: Record<string, unknown>, key: string) {
 }
 
 function bool(data: Record<string, unknown>, key: string) {
-  return data[key] === true
+  const value = data[key]
+  return value === true || value === 'true' || value === 1 || value === '1'
 }
 
 /** Add whole months to a YYYY-MM-DD date, clamping to the last day of the target month. */
@@ -126,12 +128,29 @@ function UnitSelectField({
   onChange: (key: string, value: unknown) => void
 }) {
   const { state } = useDashboard()
-  const vacant = vacantApartments(state.apartments, state.tenants)
+  const landlordId = str(data, 'landlordId')
+  const vacant = vacantApartments(state.apartments, state.tenants).filter((a) =>
+    landlordId ? a.landlordId === landlordId : false,
+  )
   const selectedId = str(data, 'apartmentId')
   const selected = state.apartments.find((a) => a.id === selectedId)
   const building = selected
     ? state.buildings.find((b) => b.id === selected.buildingId)
     : undefined
+
+  function selectLandlord(id: string) {
+    onChange('landlordId', id)
+    const landlord = state.landlords.find((l) => l.id === id)
+    onChange('landlordName', landlord?.name ?? '')
+    // Clear unit when landlord changes
+    onChange('apartmentId', '')
+    onChange('propertyAddress', '')
+    onChange('unitNumber', '')
+    onChange('apartmentAmount', '')
+    onChange('apartmentDeposit', '')
+    onChange('adminFeeAmount', '')
+    onChange('listingRef', '')
+  }
 
   function selectUnit(id: string) {
     const apartment = state.apartments.find((a) => a.id === id)
@@ -140,6 +159,9 @@ function UnitSelectField({
       : undefined
     onChange('apartmentId', id)
     if (apartment && b) {
+      onChange('landlordId', apartment.landlordId)
+      const landlord = state.landlords.find((l) => l.id === apartment.landlordId)
+      onChange('landlordName', landlord?.name ?? '')
       onChange('propertyAddress', `${b.address}, Unit ${apartment.unitNumber}`)
       onChange('unitNumber', apartment.unitNumber)
       onChange('apartmentAmount', String(apartment.rent))
@@ -160,12 +182,29 @@ function UnitSelectField({
   return (
     <>
       <label className="field field-span">
-        <span className="field-label">Select onboarded unit</span>
+        <span className="field-label">Landlord</span>
+        <select value={landlordId} onChange={(e) => selectLandlord(e.target.value)}>
+          <option value="">Choose a landlord…</option>
+          {state.landlords.map((l) => (
+            <option key={l.id} value={l.id}>
+              {l.name} · {l.email}
+            </option>
+          ))}
+        </select>
+        <span className="field-hint">
+          Select the landlord first. Only their vacant units will appear below.
+        </span>
+      </label>
+      <label className="field field-span">
+        <span className="field-label">Select unit</span>
         <select
           value={selectedId}
           onChange={(e) => selectUnit(e.target.value)}
+          disabled={!landlordId}
         >
-          <option value="">Choose a vacant unit…</option>
+          <option value="">
+            {landlordId ? 'Choose a vacant unit…' : 'Select a landlord first…'}
+          </option>
           {vacant.map((apartment) => {
             const b = state.buildings.find((x) => x.id === apartment.buildingId)
             return (
@@ -177,30 +216,46 @@ function UnitSelectField({
           })}
         </select>
         <span className="field-hint">
-          Only vacant (unassigned) units appear here. Onboard more under Units.
+          Only vacant units for the selected landlord appear here.
         </span>
       </label>
       {selected && building ? (
         <>
           <label className="field field-span">
             <span className="field-label">Property address</span>
-            <input type="text" value={building.address} readOnly />
+            <input className="input-filled-locked" type="text" value={building.address} readOnly />
           </label>
           <label className="field">
             <span className="field-label">Unit number</span>
-            <input type="text" value={selected.unitNumber} readOnly />
+            <input
+              className="input-filled-locked"
+              type="text"
+              value={selected.unitNumber}
+              readOnly
+            />
           </label>
           <label className="field">
             <span className="field-label">Monthly rent</span>
-            <input type="text" value={formatMoney(selected.rent)} readOnly />
+            <input
+              className="input-filled-locked"
+              type="text"
+              value={formatMoney(selected.rent)}
+              readOnly
+            />
           </label>
           <label className="field">
             <span className="field-label">Deposit</span>
-            <input type="text" value={formatMoney(selected.deposit)} readOnly />
+            <input
+              className="input-filled-locked"
+              type="text"
+              value={formatMoney(selected.deposit)}
+              readOnly
+            />
           </label>
           <label className="field">
             <span className="field-label">Admin fees</span>
             <input
+              className="input-filled-locked"
               type="text"
               value={formatMoney(Number(str(data, 'adminFeeAmount') || DEFAULT_ADMIN_FEE))}
               readOnly
@@ -208,10 +263,10 @@ function UnitSelectField({
           </label>
         </>
       ) : null}
-      {vacant.length === 0 ? (
+      {landlordId && vacant.length === 0 ? (
         <p className="section-lead">
-          No vacant units available. Add units from the Units menu before starting an
-          application.
+          No vacant units for this landlord. Add units under Units (agent) or ask the
+          landlord to add units in their portal.
         </p>
       ) : null}
     </>
@@ -235,22 +290,29 @@ function FileField({
   onChange: (fileList: FileList | null) => void
   uploading?: boolean
 }) {
+  const buttonText = uploading ? 'Uploading…' : 'Upload'
+
   return (
-    <label className="field file-field field-span" htmlFor={id}>
-      <span className="field-label">{label}</span>
+    <div className="field file-field field-span">
       {hint ? <span className="field-hint">{hint}</span> : null}
-      <input
-        id={id}
-        type="file"
-        accept={accept}
-        multiple
-        disabled={uploading}
-        onChange={(e) => {
-          onChange(e.target.files)
-          e.target.value = ''
-        }}
-      />
-      {uploading ? <span className="file-selected">Uploading…</span> : null}
+      <label className="file-upload-control">
+        <span className={`file-upload-btn${files.length > 0 ? ' has-files' : ''}`}>
+          {buttonText}
+        </span>
+        <input
+          id={id}
+          className="file-upload-input"
+          type="file"
+          accept={accept}
+          multiple
+          disabled={uploading}
+          aria-label={`Upload ${label}`}
+          onChange={(e) => {
+            onChange(e.target.files)
+            e.target.value = ''
+          }}
+        />
+      </label>
       {files.length > 0 ? (
         <ul className="file-selected-list">
           {files.map((name) => (
@@ -259,10 +321,8 @@ function FileField({
             </li>
           ))}
         </ul>
-      ) : (
-        <span className="field-hint">You can select multiple files.</span>
-      )}
-    </label>
+      ) : null}
+    </div>
   )
 }
 
@@ -329,53 +389,134 @@ export function InquiryForm({ data, onChange }: FormProps) {
       <div className="role-callout role-agent" role="note">
         <strong>Editable by agent / realtor only.</strong>
         <span>
-          Use this step to open the application with basic applicant and apartment
-          details. The tenant completes their finances and documents in the next step.
+          Agent details are pre-filled and locked. Choose the landlord and unit, then
+          capture the applicant contacts.
         </span>
       </div>
 
-      <fieldset className="form-section">
-        <legend>Agent / realtor</legend>
+      <fieldset className="form-section form-section-locked">
+        <legend>1. Agent / realtor details</legend>
+        <p className="field-hint field-span">
+          Pre-completed for this session — not editable.
+        </p>
         <label className="field">
           <span className="field-label">Agent / realtor name</span>
           <input
+            className="input-filled-locked"
             type="text"
             value={str(data, 'agentName')}
-            onChange={(e) => onChange('agentName', e.target.value)}
-            placeholder="Jane Agent"
+            readOnly
           />
         </label>
         <label className="field">
           <span className="field-label">Agency / brokerage</span>
           <input
+            className="input-filled-locked"
             type="text"
             value={str(data, 'agency')}
-            onChange={(e) => onChange('agency', e.target.value)}
-            placeholder="Harbor Realty"
+            readOnly
           />
         </label>
         <label className="field">
           <span className="field-label">Agent email</span>
           <input
+            className="input-filled-locked"
             type="email"
             value={str(data, 'agentEmail')}
-            onChange={(e) => onChange('agentEmail', e.target.value)}
-            placeholder="agent@agency.com"
+            readOnly
           />
         </label>
         <label className="field">
           <span className="field-label">Agent phone</span>
           <input
+            className="input-filled-locked"
             type="tel"
             value={str(data, 'agentPhone')}
-            onChange={(e) => onChange('agentPhone', e.target.value)}
-            placeholder="+1 (555) 010-1000"
+            readOnly
           />
         </label>
       </fieldset>
 
       <fieldset className="form-section">
-        <legend>Applicant contact details</legend>
+        <legend>2. Unit & agreement</legend>
+        <UnitSelectField data={data} onChange={onChange} />
+        <label className="field">
+          <span className="field-label">Move-in / start date</span>
+          <input
+            type="date"
+            value={moveInDate}
+            onChange={(e) => setMoveInDate(e.target.value)}
+          />
+        </label>
+        <label className="field">
+          <span className="field-label">Agreement term</span>
+          <select
+            value={agreementTerm}
+            onChange={(e) => setAgreementTerm(e.target.value)}
+          >
+            <option value="">Select…</option>
+            <option value="12">12 Months</option>
+            <option value="24">24 Months</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label className="field">
+          <span className="field-label">Term end date</span>
+          <input
+            type="date"
+            value={str(data, 'termEndDate')}
+            onChange={(e) => {
+              if (!termEndEditable) return
+              onChange('termEndDate', e.target.value)
+            }}
+            disabled={!termEndEditable}
+            className={!termEndEditable ? 'input-filled-locked' : undefined}
+            aria-readonly={!termEndEditable}
+            title={
+              termEndEditable
+                ? 'Select the custom term end date'
+                : fixedTermMonths
+                  ? 'Locked — calculated from move-in date and agreement term'
+                  : 'Select 12 Months, 24 Months, or Other first'
+            }
+          />
+          {fixedTermMonths ? (
+            <span className="field-hint">
+              Auto-filled from move-in date + {fixedTermMonths} months and locked.
+              {!moveInDate ? ' Set a move-in date to calculate it.' : ''}
+            </span>
+          ) : termEndEditable ? (
+            <span className="field-hint">Enter the custom term end date.</span>
+          ) : (
+            <span className="field-hint">
+              Choose an agreement term to set or unlock the end date.
+            </span>
+          )}
+        </label>
+        <label className="field">
+          <span className="field-label">Application type</span>
+          <select
+            value={str(data, 'applicationType')}
+            onChange={(e) => onChange('applicationType', e.target.value)}
+          >
+            <option value="">Select…</option>
+            <option value="rental">Rental</option>
+            <option value="lease-to-own">Lease to own</option>
+          </select>
+        </label>
+        <label className="field field-span">
+          <span className="field-label">Additional notes</span>
+          <textarea
+            rows={3}
+            value={str(data, 'applicationNotes')}
+            onChange={(e) => onChange('applicationNotes', e.target.value)}
+            placeholder="Any other basic details about the application…"
+          />
+        </label>
+      </fieldset>
+
+      <fieldset className="form-section">
+        <legend>3. Applicant contact details</legend>
         <label className="field">
           <span className="field-label">Full name</span>
           <input
@@ -423,83 +564,6 @@ export function InquiryForm({ data, onChange }: FormProps) {
             value={str(data, 'occupantCount')}
             onChange={(e) => onChange('occupantCount', e.target.value)}
             placeholder="1"
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Move-in / start date</span>
-          <input
-            type="date"
-            value={moveInDate}
-            onChange={(e) => setMoveInDate(e.target.value)}
-          />
-        </label>
-      </fieldset>
-
-      <fieldset className="form-section">
-        <legend>Unit & agreement</legend>
-        <UnitSelectField data={data} onChange={onChange} />
-        <label className="field">
-          <span className="field-label">Agreement term</span>
-          <select
-            value={agreementTerm}
-            onChange={(e) => setAgreementTerm(e.target.value)}
-          >
-            <option value="">Select…</option>
-            <option value="12">12 Months</option>
-            <option value="24">24 Months</option>
-            <option value="other">Other</option>
-          </select>
-        </label>
-        <label className="field">
-          <span className="field-label">Term end date</span>
-          <input
-            type="date"
-            value={str(data, 'termEndDate')}
-            onChange={(e) => {
-              if (!termEndEditable) return
-              onChange('termEndDate', e.target.value)
-            }}
-            disabled={!termEndEditable}
-            aria-readonly={!termEndEditable}
-            title={
-              termEndEditable
-                ? 'Select the custom term end date'
-                : fixedTermMonths
-                  ? 'Locked — calculated from move-in date and agreement term'
-                  : 'Select 12 Months, 24 Months, or Other first'
-            }
-          />
-          {fixedTermMonths ? (
-            <span className="field-hint">
-              Auto-filled from move-in date + {fixedTermMonths} months and locked.
-              {!moveInDate ? ' Set a move-in date to calculate it.' : ''}
-            </span>
-          ) : termEndEditable ? (
-            <span className="field-hint">Enter the custom term end date.</span>
-          ) : (
-            <span className="field-hint">
-              Choose an agreement term to set or unlock the end date.
-            </span>
-          )}
-        </label>
-        <label className="field">
-          <span className="field-label">Application type</span>
-          <select
-            value={str(data, 'applicationType')}
-            onChange={(e) => onChange('applicationType', e.target.value)}
-          >
-            <option value="">Select…</option>
-            <option value="rental">Rental</option>
-            <option value="lease-to-own">Lease to own</option>
-          </select>
-        </label>
-        <label className="field field-span">
-          <span className="field-label">Additional notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'applicationNotes')}
-            onChange={(e) => onChange('applicationNotes', e.target.value)}
-            placeholder="Any other basic details about the applicant…"
           />
         </label>
       </fieldset>
@@ -647,24 +711,24 @@ export function DocumentsForm({ data, onChange }: FormProps) {
         </p>
         <FileField
           id="idDocs"
-          label="1. ID documents"
-          hint="Passport, driver's license, or national ID"
+          label="ID documents"
+          hint="1. ID documents — passport, driver's license, or national ID"
           files={fileNames(data, 'idDocs')}
           uploading={bool(data, 'idDocsUploading')}
           onChange={makeMultiFileHandler(data, onChange, 'idDocs', 'idDoc')}
         />
         <FileField
           id="payslipDocs"
-          label="2. Payslip"
-          hint="Recent payslips"
+          label="Payslip"
+          hint="2. Payslip — recent payslips"
           files={fileNames(data, 'payslipDocs')}
           uploading={bool(data, 'payslipDocsUploading')}
           onChange={makeMultiFileHandler(data, onChange, 'payslipDocs', 'payslip')}
         />
         <FileField
           id="bankStatementDocs"
-          label="3. 3 Months Bank statement"
-          hint="Bank statements covering the last three months"
+          label="Bank statement"
+          hint="3. 3 Months bank statement"
           files={fileNames(data, 'bankStatementDocs')}
           uploading={bool(data, 'bankStatementDocsUploading')}
           onChange={makeMultiFileHandler(
@@ -860,18 +924,20 @@ export function KycForm({ data, onChange }: FormProps) {
   )
 }
 
-function BankingDetailsCard({ data, onChange }: FormProps) {
+function BankingDetailsCard({ data }: FormProps) {
   return (
     <div className="banking-card">
       <h3>Banking details for this rental unit</h3>
+      <p className="banking-hint">Pre-filled for this unit — use as shown when paying.</p>
       <dl className="banking-details">
         <div>
           <dt>Account name</dt>
           <dd>
             <input
+              className="input-filled-locked"
               type="text"
               value={str(data, 'bankAccountName') || 'Property Trust Account'}
-              onChange={(e) => onChange('bankAccountName', e.target.value)}
+              readOnly
             />
           </dd>
         </div>
@@ -879,9 +945,10 @@ function BankingDetailsCard({ data, onChange }: FormProps) {
           <dt>Bank</dt>
           <dd>
             <input
+              className="input-filled-locked"
               type="text"
               value={str(data, 'bankName') || 'First National Bank'}
-              onChange={(e) => onChange('bankName', e.target.value)}
+              readOnly
             />
           </dd>
         </div>
@@ -889,9 +956,10 @@ function BankingDetailsCard({ data, onChange }: FormProps) {
           <dt>Account number</dt>
           <dd>
             <input
+              className="input-filled-locked"
               type="text"
               value={str(data, 'bankAccountNumber') || '6284017392'}
-              onChange={(e) => onChange('bankAccountNumber', e.target.value)}
+              readOnly
             />
           </dd>
         </div>
@@ -899,9 +967,10 @@ function BankingDetailsCard({ data, onChange }: FormProps) {
           <dt>Branch code</dt>
           <dd>
             <input
+              className="input-filled-locked"
               type="text"
               value={str(data, 'bankBranchCode') || '250655'}
-              onChange={(e) => onChange('bankBranchCode', e.target.value)}
+              readOnly
             />
           </dd>
         </div>
@@ -909,6 +978,7 @@ function BankingDetailsCard({ data, onChange }: FormProps) {
           <dt>Reference</dt>
           <dd>
             <input
+              className="input-filled-locked"
               type="text"
               value={
                 str(data, 'bankReference') ||
@@ -916,7 +986,7 @@ function BankingDetailsCard({ data, onChange }: FormProps) {
                 str(data, 'unitNumber') ||
                 'UNIT-REF'
               }
-              onChange={(e) => onChange('bankReference', e.target.value)}
+              readOnly
             />
           </dd>
         </div>
@@ -975,8 +1045,14 @@ export function KycFeesForm({ data, onChange }: FormProps) {
         <legend>Amount to pay</legend>
         <label className="field">
           <span className="field-label">KYC check admin fees</span>
-          <input type="number" min={0} value={kycFee} readOnly />
-          <span className="field-hint">Auto-filled from the application details.</span>
+          <input
+            className="input-filled-locked"
+            type="number"
+            min={0}
+            value={kycFee}
+            readOnly
+          />
+          <span className="field-hint">Auto-filled — no input required.</span>
         </label>
         <label className="field">
           <span className="field-label">Payment date</span>
@@ -1086,22 +1162,47 @@ export function PaymentForm({ data, onChange }: FormProps) {
         <legend>Amounts to pay</legend>
         <label className="field">
           <span className="field-label">Deposit</span>
-          <input type="number" min={0} value={amounts.deposit} readOnly />
-          <span className="field-hint">From the selected unit on step 1.</span>
+          <input
+            className="input-filled-locked"
+            type="number"
+            min={0}
+            value={amounts.deposit}
+            readOnly
+          />
+          <span className="field-hint">Auto-filled from the unit — no input required.</span>
         </label>
         <label className="field">
           <span className="field-label">Rent</span>
-          <input type="number" min={0} value={amounts.rent} readOnly />
-          <span className="field-hint">From the selected unit on step 1.</span>
+          <input
+            className="input-filled-locked"
+            type="number"
+            min={0}
+            value={amounts.rent}
+            readOnly
+          />
+          <span className="field-hint">Auto-filled from the unit — no input required.</span>
         </label>
         <label className="field">
           <span className="field-label">Admin fees</span>
-          <input type="number" min={0} value={amounts.admin} readOnly />
-          <span className="field-hint">From the application details on step 1.</span>
+          <input
+            className="input-filled-locked"
+            type="number"
+            min={0}
+            value={amounts.admin}
+            readOnly
+          />
+          <span className="field-hint">Auto-filled — no input required.</span>
         </label>
         <label className="field">
           <span className="field-label">Total to pay</span>
-          <input type="number" min={0} value={amounts.total} readOnly />
+          <input
+            className="input-filled-locked"
+            type="number"
+            min={0}
+            value={amounts.total}
+            readOnly
+          />
+          <span className="field-hint">Calculated total — no input required.</span>
         </label>
         <label className="field">
           <span className="field-label">Payment date</span>
@@ -1158,21 +1259,157 @@ export function PaymentForm({ data, onChange }: FormProps) {
   )
 }
 
+function PartySignStatusBoard({
+  statuses,
+}: {
+  statuses: ReturnType<typeof leaseSignatureStatuses>
+}) {
+  const allDone = statuses.every((s) => s.done)
+  return (
+    <div
+      className={`party-sign-status${allDone ? ' party-sign-status-complete' : ''}`}
+      role="status"
+    >
+      <strong>
+        {allDone
+          ? 'All parties have signed'
+          : 'Signature status — updates when each party saves'}
+      </strong>
+      <ul className="party-sign-list">
+        {statuses.map((s) => (
+          <li key={s.role} className={s.done ? 'signed' : 'pending'}>
+            <span className="party-sign-mark" aria-hidden="true">
+              {s.done ? '✓' : '○'}
+            </span>
+            <span>
+              {s.label}: {s.done ? 'Signed' : 'Waiting to sign'}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function signatureFieldsReady(name: string, date: string, mark: string) {
+  return Boolean(name.trim() && date.trim() && mark.trim())
+}
+
+function LeaseSignatureBlock({
+  legend,
+  confirmLabel,
+  nameKey,
+  dateKey,
+  markKey,
+  doneKey,
+  namePlaceholder,
+  enabled,
+  data,
+  onChange,
+}: {
+  legend: string
+  confirmLabel: string
+  nameKey: string
+  dateKey: string
+  markKey: string
+  doneKey: string
+  namePlaceholder: string
+  enabled: boolean
+  data: Record<string, unknown>
+  onChange: (key: string, value: unknown) => void
+}) {
+  const name = str(data, nameKey)
+  const date = str(data, dateKey)
+  const mark = str(data, markKey)
+  const done = bool(data, doneKey)
+  const ready = signatureFieldsReady(name, date, mark)
+
+  useEffect(() => {
+    if (!ready && done) {
+      onChange(doneKey, false)
+    }
+  }, [ready, done, doneKey, onChange])
+
+  function updateField(key: string, value: string) {
+    onChange(key, value)
+    const nextName = key === nameKey ? value : name
+    const nextDate = key === dateKey ? value : date
+    const nextMark = key === markKey ? value : mark
+    if (!signatureFieldsReady(nextName, nextDate, nextMark) && done) {
+      onChange(doneKey, false)
+    }
+  }
+
+  return (
+    <fieldset className="signature-block" disabled={!enabled}>
+      <legend>{legend}</legend>
+      <label className="field">
+        <span className="field-label">Full legal name</span>
+        <input
+          type="text"
+          value={name}
+          onChange={(e) => updateField(nameKey, e.target.value)}
+          placeholder={namePlaceholder}
+        />
+      </label>
+      <label className="field">
+        <span className="field-label">Date signed</span>
+        <input
+          type="date"
+          value={date}
+          onChange={(e) => updateField(dateKey, e.target.value)}
+        />
+      </label>
+      <label className="field field-span">
+        <span className="field-label">Type in signature</span>
+        <input
+          className="signature-input"
+          type="text"
+          value={mark}
+          onChange={(e) => updateField(markKey, e.target.value)}
+          placeholder="Sign by typing your name"
+        />
+      </label>
+      <label className={`check-field${!ready ? ' check-field-locked' : ''}`}>
+        <input
+          type="checkbox"
+          disabled={!ready}
+          checked={done}
+          onChange={(e) => {
+            if (!ready) return
+            onChange(doneKey, e.target.checked)
+          }}
+        />
+        <span>{confirmLabel}</span>
+      </label>
+      {enabled && !ready ? (
+        <span className="field-hint field-span">
+          Complete full legal name, date signed, and typed signature before confirming.
+        </span>
+      ) : null}
+    </fieldset>
+  )
+}
+
 export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
   const isAgent = viewerRole === 'admin' || viewerRole === 'agent' || !viewerRole
   const canTenant = !viewerRole || viewerRole === 'tenant'
   const canLandlord = !viewerRole || viewerRole === 'landlord'
   const canAgent = isAgent
+  const statuses = leaseSignatureStatuses(data)
 
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
         <strong>Lease signing — all parties.</strong>
         <span>
-          Upload or review the lease PDF, then the applicant, landlord, and agent each
-          sign online below. You can only complete your own signature block.
+          Complete your own signature block, then click Next. You do not need to wait for
+          the others to sign first. Move-in unlocks only after tenant, landlord, and agent
+          have each clicked Next.
         </span>
       </div>
+
+      <PartySignStatusBoard statuses={statuses} />
 
       <fieldset className="form-section" disabled={!canAgent}>
         <legend>Lease document</legend>
@@ -1231,216 +1468,80 @@ export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
         </div>
 
         <div className="signature-grid">
-          <fieldset className="signature-block" disabled={!canTenant}>
-            <legend>Applicant signature</legend>
-            <label className="field">
-              <span className="field-label">Full legal name</span>
-              <input
-                type="text"
-                value={str(data, 'signApplicantName')}
-                onChange={(e) => onChange('signApplicantName', e.target.value)}
-                placeholder={str(data, 'applicantName') || 'Tenant full name'}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Date signed</span>
-              <input
-                type="date"
-                value={str(data, 'signApplicantDate')}
-                onChange={(e) => onChange('signApplicantDate', e.target.value)}
-              />
-            </label>
-            <label className="field field-span">
-              <span className="field-label">Type signature</span>
-              <input
-                className="signature-input"
-                type="text"
-                value={str(data, 'signApplicantMark')}
-                onChange={(e) => onChange('signApplicantMark', e.target.value)}
-                placeholder="Sign by typing your name"
-              />
-            </label>
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={bool(data, 'signApplicantDone')}
-                onChange={(e) => onChange('signApplicantDone', e.target.checked)}
-              />
-              <span>Applicant has signed the lease PDF</span>
-            </label>
-          </fieldset>
-
-          <fieldset className="signature-block" disabled={!canLandlord}>
-            <legend>Landlord signature</legend>
-            <label className="field">
-              <span className="field-label">Full legal name</span>
-              <input
-                type="text"
-                value={str(data, 'signLandlordName')}
-                onChange={(e) => onChange('signLandlordName', e.target.value)}
-                placeholder="Landlord full name"
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Date signed</span>
-              <input
-                type="date"
-                value={str(data, 'signLandlordDate')}
-                onChange={(e) => onChange('signLandlordDate', e.target.value)}
-              />
-            </label>
-            <label className="field field-span">
-              <span className="field-label">Type signature</span>
-              <input
-                className="signature-input"
-                type="text"
-                value={str(data, 'signLandlordMark')}
-                onChange={(e) => onChange('signLandlordMark', e.target.value)}
-                placeholder="Sign by typing your name"
-              />
-            </label>
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={bool(data, 'signLandlordDone')}
-                onChange={(e) => onChange('signLandlordDone', e.target.checked)}
-              />
-              <span>Landlord has signed the lease PDF</span>
-            </label>
-          </fieldset>
-
-          <fieldset className="signature-block" disabled={!canAgent}>
-            <legend>Agent signature</legend>
-            <label className="field">
-              <span className="field-label">Full legal name</span>
-              <input
-                type="text"
-                value={str(data, 'signAgentName')}
-                onChange={(e) => onChange('signAgentName', e.target.value)}
-                placeholder={str(data, 'agentName') || 'Agent full name'}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Date signed</span>
-              <input
-                type="date"
-                value={str(data, 'signAgentDate')}
-                onChange={(e) => onChange('signAgentDate', e.target.value)}
-              />
-            </label>
-            <label className="field field-span">
-              <span className="field-label">Type signature</span>
-              <input
-                className="signature-input"
-                type="text"
-                value={str(data, 'signAgentMark')}
-                onChange={(e) => onChange('signAgentMark', e.target.value)}
-                placeholder="Sign by typing your name"
-              />
-            </label>
-            <label className="check-field">
-              <input
-                type="checkbox"
-                checked={bool(data, 'signAgentDone')}
-                onChange={(e) => onChange('signAgentDone', e.target.checked)}
-              />
-              <span>Agent has signed the lease PDF</span>
-            </label>
-          </fieldset>
+          <LeaseSignatureBlock
+            legend="Applicant signature"
+            confirmLabel="Applicant has signed the lease PDF"
+            nameKey="signApplicantName"
+            dateKey="signApplicantDate"
+            markKey="signApplicantMark"
+            doneKey="signApplicantDone"
+            namePlaceholder={str(data, 'applicantName') || 'Tenant full name'}
+            enabled={canTenant}
+            data={data}
+            onChange={onChange}
+          />
+          <LeaseSignatureBlock
+            legend="Landlord signature"
+            confirmLabel="Landlord has signed the lease PDF"
+            nameKey="signLandlordName"
+            dateKey="signLandlordDate"
+            markKey="signLandlordMark"
+            doneKey="signLandlordDone"
+            namePlaceholder="Landlord full name"
+            enabled={canLandlord}
+            data={data}
+            onChange={onChange}
+          />
+          <LeaseSignatureBlock
+            legend="Agent signature"
+            confirmLabel="Agent has signed the lease PDF"
+            nameKey="signAgentName"
+            dateKey="signAgentDate"
+            markKey="signAgentMark"
+            doneKey="signAgentDone"
+            namePlaceholder={str(data, 'agentName') || 'Agent full name'}
+            enabled={canAgent}
+            data={data}
+            onChange={onChange}
+          />
         </div>
       </div>
     </div>
   )
 }
 
-export function CompletionForm({ data, onChange }: FormProps) {
-  return (
-    <div className="form-grid">
-      <div className="completion-summary">
-        <h3>Application process complete</h3>
-        <p>
-          Confirm that all prior steps are done and the tenancy is ready to proceed to
-          move-in inspection.
-        </p>
-      </div>
+export function SuccessForm({ data }: FormProps) {
+  const applicant = str(data, 'applicantName') || 'the applicant'
+  const property = str(data, 'propertyAddress') || 'the selected unit'
 
-      <fieldset className="form-section">
-        <legend>Completion checklist</legend>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={bool(data, 'completeInquiry')}
-            onChange={(e) => onChange('completeInquiry', e.target.checked)}
-          />
-          <span>Application details captured by agent</span>
-        </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={bool(data, 'completeDocs')}
-            onChange={(e) => onChange('completeDocs', e.target.checked)}
-          />
-          <span>Applicant documents and consent received</span>
-        </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={bool(data, 'completeKyc')}
-            onChange={(e) => onChange('completeKyc', e.target.checked)}
-          />
-          <span>KYC approved by agent and landlord</span>
-        </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={bool(data, 'completePayment')}
-            onChange={(e) => onChange('completePayment', e.target.checked)}
-          />
-          <span>Deposit, rent, and admin fees received with proof</span>
-        </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={bool(data, 'completeLease')}
-            onChange={(e) => onChange('completeLease', e.target.checked)}
-          />
-          <span>Lease signed by applicant, landlord, and agent</span>
-        </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            checked={bool(data, 'applicationComplete')}
-            onChange={(e) => onChange('applicationComplete', e.target.checked)}
-          />
-          <span>Application process marked complete</span>
-        </label>
-        <label className="field">
-          <span className="field-label">Completion date</span>
-          <input
-            type="date"
-            value={str(data, 'completionDate')}
-            onChange={(e) => onChange('completionDate', e.target.value)}
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Confirmed by</span>
-          <input
-            type="text"
-            value={str(data, 'completionBy')}
-            onChange={(e) => onChange('completionBy', e.target.value)}
-            placeholder={str(data, 'agentName') || 'Agent name'}
-          />
-        </label>
-        <label className="field field-span">
-          <span className="field-label">Final notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'completionNotes')}
-            onChange={(e) => onChange('completionNotes', e.target.value)}
-            placeholder="Any remaining remarks before move-in…"
-          />
-        </label>
-      </fieldset>
+  return (
+    <div className="success-panel" role="status">
+      <div className="success-panel-mark" aria-hidden="true">
+        ✓
+      </div>
+      <h3>Application successfully completed</h3>
+      <p className="success-panel-lead">
+        Everything required for this tenancy has been finished. You are all set —
+        nothing further is needed on this application.
+      </p>
+      <dl className="success-panel-meta">
+        <div>
+          <dt>Applicant</dt>
+          <dd>{applicant}</dd>
+        </div>
+        <div>
+          <dt>Property</dt>
+          <dd>{property}</dd>
+        </div>
+      </dl>
+      <ul className="success-panel-checks">
+        <li>Lease signed by all parties</li>
+        <li>Move-in inspection recorded</li>
+        <li>Application closed successfully</li>
+      </ul>
+      <p className="success-panel-note">
+        Use <strong>Go to Dashboard</strong> below to return to your portal home.
+      </p>
     </div>
   )
 }
@@ -1470,15 +1571,18 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
   const canAgent = !viewerRole || viewerRole === 'admin' || viewerRole === 'agent'
   const canTenant = !viewerRole || viewerRole === 'tenant'
   const canLandlord = !viewerRole || viewerRole === 'landlord'
+  const statuses = moveInSignStatuses(data)
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
         <strong>Move-in inspection — agent, tenant & landlord.</strong>
         <span>
-          Record the apartment condition before the tenant moves in. Each party signs off
-          their acknowledgement below.
+          Complete your sign-off, then click Next. You do not need to wait for the others
+          first. The success page opens only after all three parties have clicked Next.
         </span>
       </div>
+
+      <PartySignStatusBoard statuses={statuses} />
 
       <fieldset className="form-section">
         <legend>Inspection details</legend>

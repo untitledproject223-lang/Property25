@@ -143,11 +143,37 @@ authRouter.post('/login', async (req, res, next) => {
   }
 })
 
+authRouter.post('/change-password', requireAuth, async (req, res, next) => {
+  try {
+    const body = z
+      .object({
+        currentPassword: z.string().min(6),
+        newPassword: z.string().min(8).max(120),
+      })
+      .parse(req.body)
+
+    const rows = await sql`
+      SELECT id, password_hash FROM users WHERE id = ${req.auth!.sub} LIMIT 1
+    `
+    if (rows.length === 0) throw new AppError(404, 'User not found')
+    const ok = await bcrypt.compare(body.currentPassword, String(rows[0].password_hash))
+    if (!ok) throw new AppError(400, 'Current password is incorrect')
+
+    const hash = await bcrypt.hash(body.newPassword, 10)
+    await sql`UPDATE users SET password_hash = ${hash} WHERE id = ${req.auth!.sub}`
+    res.json({ data: { ok: true } })
+  } catch (err) {
+    next(err)
+  }
+})
+
 authRouter.get('/me', requireAuth, async (req, res, next) => {
   try {
     const auth = req.auth!
     const userRows = await sql`
-      SELECT id, email, full_name FROM users WHERE id = ${auth.sub} LIMIT 1
+      SELECT id, email, full_name, avatar_base64 AS "avatarBase64",
+        avatar_mime AS "avatarMime"
+      FROM users WHERE id = ${auth.sub} LIMIT 1
     `
     if (userRows.length === 0) throw new AppError(401, 'Session no longer valid')
 

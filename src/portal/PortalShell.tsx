@@ -67,10 +67,11 @@ export function TenantShell() {
       title="Tenant Portal"
       nav={[
         { to: '/tenant', label: 'Home', end: true },
-        { to: '/tenant/applications', label: 'Applications' },
         { to: '/tenant/stays', label: 'Stays' },
+        { to: '/tenant/invoices', label: 'Invoices' },
         { to: '/tenant/issues', label: 'Tickets' },
         { to: '/tenant/profile', label: 'Profile' },
+        { to: '/tenant/applications', label: 'Applications' },
       ]}
     />
   )
@@ -82,9 +83,11 @@ export function LandlordShell() {
       title="Landlord Portal"
       nav={[
         { to: '/landlord', label: 'Portfolio', end: true },
-        { to: '/landlord/applications', label: 'Applications' },
+        { to: '/landlord/units', label: 'Units' },
+        { to: '/landlord/invoices', label: 'Invoices' },
         { to: '/landlord/issues', label: 'Tickets' },
         { to: '/landlord/profile', label: 'Profile' },
+        { to: '/landlord/applications', label: 'Applications' },
       ]}
     />
   )

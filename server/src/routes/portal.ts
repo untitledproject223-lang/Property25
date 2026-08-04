@@ -90,7 +90,8 @@ portalRouter.get('/tenant/stays/:id', requireTenant, async (req, res, next) => {
       sql`
         SELECT id, issued_at AS "issuedAt", due_date AS "dueDate",
           items_json AS items, total::float8 AS total, status, notes,
-          billing_kind AS "billingKind"
+          billing_kind AS "billingKind", is_recurring AS "isRecurring",
+          issue_id AS "issueId"
         FROM invoices WHERE tenant_id = ${id} AND org_id = ${req.orgId!}
         ORDER BY issued_at DESC
       `,
@@ -149,10 +150,12 @@ portalRouter.get('/tenant/stays/:id', requireTenant, async (req, res, next) => {
 portalRouter.get('/tenant/profile', requireTenant, async (req, res, next) => {
   try {
     const user = await sql`
-      SELECT id, email, full_name AS name FROM users WHERE id = ${req.auth!.sub} LIMIT 1
+      SELECT id, email, full_name AS name, avatar_base64 AS "avatarBase64",
+        avatar_mime AS "avatarMime"
+      FROM users WHERE id = ${req.auth!.sub} LIMIT 1
     `
     const tenant = await sql`
-      SELECT id, phone, whatsapp, name
+      SELECT id, phone, whatsapp, name, application_id AS "applicationId"
       FROM tenants
       WHERE user_id = ${req.auth!.sub} AND org_id = ${req.orgId!}
       ORDER BY updated_at DESC
@@ -165,8 +168,116 @@ portalRouter.get('/tenant/profile', requireTenant, async (req, res, next) => {
         whatsapp: tenant[0]?.whatsapp ?? null,
         displayName: tenant[0]?.name ?? user[0]?.name,
         tenantId: tenant[0]?.id ?? null,
+        applicationId: tenant[0]?.applicationId ?? null,
       },
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Tenant: update personal details (not email) */
+portalRouter.patch('/tenant/profile', requireTenant, async (req, res, next) => {
+  try {
+    const body = z
+      .object({
+        name: z.string().min(1).max(160).optional(),
+        phone: z.string().min(5).max(40).optional(),
+        whatsapp: z.string().max(40).optional().nullable(),
+      })
+      .parse(req.body)
+
+    if (body.name) {
+      await sql`
+        UPDATE users SET full_name = ${body.name.trim()}
+        WHERE id = ${req.auth!.sub}
+      `
+    }
+
+    const tenant = await sql`
+      SELECT id FROM tenants
+      WHERE user_id = ${req.auth!.sub} AND org_id = ${req.orgId!}
+      ORDER BY updated_at DESC LIMIT 1
+    `
+    if (tenant.length > 0) {
+      await sql`
+        UPDATE tenants SET
+          name = COALESCE(${body.name?.trim() ?? null}, name),
+          phone = COALESCE(${body.phone ?? null}, phone),
+          whatsapp = COALESCE(${body.whatsapp ?? null}, whatsapp),
+          updated_at = now()
+        WHERE id = ${tenant[0].id}
+      `
+    }
+
+    const updated = await sql`
+      SELECT u.id, u.email, u.full_name AS name, u.avatar_base64 AS "avatarBase64",
+        u.avatar_mime AS "avatarMime",
+        t.id AS "tenantId", t.phone, t.whatsapp, t.name AS "displayName",
+        t.application_id AS "applicationId"
+      FROM users u
+      LEFT JOIN tenants t ON t.user_id = u.id AND t.org_id = ${req.orgId!}
+      WHERE u.id = ${req.auth!.sub}
+      ORDER BY t.updated_at DESC NULLS LAST
+      LIMIT 1
+    `
+    res.json({ data: updated[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Tenant: upload / replace profile picture */
+portalRouter.post('/tenant/profile/avatar', requireTenant, async (req, res, next) => {
+  try {
+    const body = z
+      .object({
+        contentBase64: z.string().min(1),
+        mimeType: z.string().min(3).max(80),
+      })
+      .parse(req.body)
+    if (!body.mimeType.startsWith('image/')) {
+      throw new AppError(400, 'Avatar must be an image')
+    }
+    await sql`
+      UPDATE users
+      SET avatar_base64 = ${body.contentBase64}, avatar_mime = ${body.mimeType}
+      WHERE id = ${req.auth!.sub}
+    `
+    res.json({ data: { ok: true } })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Tenant: all invoices across stays */
+portalRouter.get('/tenant/invoices', requireTenant, async (req, res, next) => {
+  try {
+    const rows = await sql`
+      SELECT
+        i.id,
+        i.issued_at AS "issuedAt",
+        i.due_date AS "dueDate",
+        i.items_json AS items,
+        i.total::float8 AS total,
+        i.status,
+        i.notes,
+        i.billing_kind AS "billingKind",
+        i.is_recurring AS "isRecurring",
+        i.issue_id AS "issueId",
+        t.id AS "tenantId",
+        a.unit_number AS "unitNumber",
+        b.name AS "buildingName"
+      FROM invoices i
+      JOIN tenants t ON t.id = i.tenant_id
+      JOIN apartments a ON a.id = t.apartment_id
+      JOIN buildings b ON b.id = a.building_id
+      WHERE t.user_id = ${req.auth!.sub}
+        AND i.org_id = ${req.orgId!}
+        AND i.status <> 'draft'
+      ORDER BY i.issued_at DESC
+    `
+    res.json({ data: rows })
   } catch (err) {
     next(err)
   }
@@ -197,16 +308,25 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         t.id AS "tenantId",
         t.name AS "tenantName",
         t.email AS "tenantEmail",
+        t.phone AS "tenantPhone",
         t.status AS "tenantStatus",
+        t.lease_start AS "leaseStart",
+        t.lease_end AS "leaseEnd",
         (
           SELECT count(*)::int FROM issues i
           WHERE i.tenant_id = t.id AND i.status IN ('open', 'pending')
         ) AS "openIssues"
       FROM apartments a
       JOIN buildings b ON b.id = a.building_id
-      LEFT JOIN tenants t ON t.apartment_id = a.id AND t.status IN ('active', 'notice')
+      LEFT JOIN tenants t ON t.apartment_id = a.id
+        AND t.status IN ('active', 'notice')
+        AND t.application_id IS NOT NULL
       WHERE a.landlord_id = ${landlordId} AND a.org_id = ${req.orgId!}
-      ORDER BY b.name, a.unit_number
+      ORDER BY
+        CASE WHEN t.id IS NULL THEN 1 ELSE 0 END,
+        t.name NULLS LAST,
+        b.name,
+        a.unit_number
     `
 
     res.json({
@@ -246,6 +366,145 @@ portalRouter.patch(
     }
   },
 )
+
+/** Landlord: list org buildings (for adding units) */
+portalRouter.get('/landlord/buildings', requireLandlord, async (req, res, next) => {
+  try {
+    const rows = await sql`
+      SELECT id, name, address
+      FROM buildings
+      WHERE org_id = ${req.orgId!}
+      ORDER BY name
+    `
+    res.json({ data: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Landlord: add a unit under their own landlord profile */
+portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => {
+  try {
+    const body = z
+      .object({
+        buildingId: z.string().uuid().optional(),
+        newBuildingName: z.string().min(1).max(160).optional(),
+        newBuildingAddress: z.string().max(240).optional(),
+        unitNumber: z.string().min(1).max(40),
+        rent: z.number().positive(),
+        deposit: z.number().nonnegative(),
+      })
+      .parse(req.body)
+
+    const landlord = await sql`
+      SELECT id FROM landlords
+      WHERE user_id = ${req.auth!.sub} AND org_id = ${req.orgId!}
+      LIMIT 1
+    `
+    if (landlord.length === 0) throw new AppError(404, 'Landlord profile not found')
+    const landlordId = String(landlord[0].id)
+
+    let buildingId = body.buildingId
+    if (body.newBuildingName?.trim()) {
+      const created = await sql`
+        INSERT INTO buildings (org_id, name, address)
+        VALUES (
+          ${req.orgId!},
+          ${body.newBuildingName.trim()},
+          ${body.newBuildingAddress?.trim() || 'Address TBD'}
+        )
+        RETURNING id
+      `
+      buildingId = String(created[0].id)
+    }
+    if (!buildingId) throw new AppError(400, 'Select or create a building')
+
+    const building = await sql`
+      SELECT id FROM buildings WHERE id = ${buildingId} AND org_id = ${req.orgId!} LIMIT 1
+    `
+    if (building.length === 0) throw new AppError(400, 'Building not found')
+
+    const rows = await sql`
+      INSERT INTO apartments (
+        org_id, building_id, landlord_id, unit_number, rent, deposit, status
+      )
+      VALUES (
+        ${req.orgId!}, ${buildingId}, ${landlordId}, ${body.unitNumber.trim()},
+        ${body.rent}, ${body.deposit}, 'vacant'
+      )
+      RETURNING id, unit_number AS "unitNumber", rent::float8 AS rent,
+        deposit::float8 AS deposit, status, building_id AS "buildingId",
+        landlord_id AS "landlordId"
+    `
+
+    res.status(201).json({ data: rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Landlord: invoices for tenants on their units */
+portalRouter.get('/landlord/invoices', requireLandlord, async (req, res, next) => {
+  try {
+    const rows = await sql`
+      SELECT
+        i.id,
+        i.issued_at AS "issuedAt",
+        i.due_date AS "dueDate",
+        i.items_json AS items,
+        i.total::float8 AS total,
+        i.status,
+        i.notes,
+        i.billing_kind AS "billingKind",
+        i.is_recurring AS "isRecurring",
+        i.issue_id AS "issueId",
+        t.id AS "tenantId",
+        t.name AS "tenantName",
+        a.unit_number AS "unitNumber",
+        b.name AS "buildingName"
+      FROM invoices i
+      JOIN tenants t ON t.id = i.tenant_id
+      JOIN apartments a ON a.id = t.apartment_id
+      JOIN buildings b ON b.id = a.building_id
+      JOIN landlords l ON l.id = a.landlord_id
+      WHERE l.user_id = ${req.auth!.sub}
+        AND i.org_id = ${req.orgId!}
+      ORDER BY i.issued_at DESC
+    `
+    res.json({ data: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Landlord: active tenants on their units (for invoice create) */
+portalRouter.get('/landlord/tenants', requireLandlord, async (req, res, next) => {
+  try {
+    const rows = await sql`
+      SELECT
+        t.id,
+        t.name,
+        t.email,
+        t.status,
+        a.id AS "apartmentId",
+        a.unit_number AS "unitNumber",
+        a.rent::float8 AS rent,
+        a.deposit::float8 AS deposit,
+        b.name AS "buildingName"
+      FROM tenants t
+      JOIN apartments a ON a.id = t.apartment_id
+      JOIN buildings b ON b.id = a.building_id
+      JOIN landlords l ON l.id = a.landlord_id
+      WHERE l.user_id = ${req.auth!.sub}
+        AND t.org_id = ${req.orgId!}
+        AND t.status IN ('active', 'notice')
+      ORDER BY t.name ASC
+    `
+    res.json({ data: rows })
+  } catch (err) {
+    next(err)
+  }
+})
 
 /** Agent helper: invite landlord */
 portalRouter.post('/agent/invite-landlord', requireAgent, async (req, res, next) => {

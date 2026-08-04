@@ -9,16 +9,18 @@ tenantsRouter.use(requireAuth)
 
 tenantsRouter.get('/', async (req, res, next) => {
   try {
+    // Only tenants onboarded through the application process
     const rows = await sql`
       SELECT
         t.id, t.org_id, t.apartment_id, t.name, t.email, t.phone, t.whatsapp,
         t.lease_start, t.lease_end, t.status, t.balance,
-        t.docs_json, t.move_in_inspection_json,
+        t.docs_json, t.move_in_inspection_json, t.application_id,
         t.created_at, t.updated_at,
         a.unit_number
       FROM tenants t
       JOIN apartments a ON a.id = t.apartment_id
       WHERE t.org_id = ${req.orgId!}
+        AND t.application_id IS NOT NULL
       ORDER BY t.name ASC
     `
     res.json({ data: rows })
@@ -29,6 +31,7 @@ tenantsRouter.get('/', async (req, res, next) => {
 
 const createTenantSchema = z.object({
   apartmentId: z.string().uuid(),
+  applicationId: z.string().uuid().optional().nullable(),
   name: z.string().min(1).max(160),
   email: z.string().email(),
   phone: z.string().min(5).max(40),
@@ -57,18 +60,34 @@ tenantsRouter.post('/', async (req, res, next) => {
     `
     if (apartment.length === 0) throw new AppError(400, 'apartmentId not found in this org')
 
+    let applicationId = body.applicationId ?? null
+    let applicantUserId: string | null = null
+    if (applicationId) {
+      const app = await sql`
+        SELECT id, applicant_user_id
+        FROM applications
+        WHERE id = ${applicationId} AND org_id = ${req.orgId!}
+        LIMIT 1
+      `
+      if (app.length === 0) throw new AppError(400, 'applicationId not found in this org')
+      applicantUserId = app[0].applicant_user_id
+        ? String(app[0].applicant_user_id)
+        : null
+    }
+
     const rows = await sql`
       INSERT INTO tenants (
-        org_id, apartment_id, name, email, phone, whatsapp,
+        org_id, apartment_id, application_id, user_id, name, email, phone, whatsapp,
         lease_start, lease_end, status, balance, docs_json, move_in_inspection_json
       )
       VALUES (
-        ${req.orgId!}, ${body.apartmentId}, ${body.name}, ${body.email}, ${body.phone},
+        ${req.orgId!}, ${body.apartmentId}, ${applicationId}, ${applicantUserId},
+        ${body.name}, ${body.email}, ${body.phone},
         ${body.whatsapp ?? null}, ${body.leaseStart}, ${body.leaseEnd}, ${body.status}, ${body.balance},
         ${JSON.stringify(body.docs ?? {})}::jsonb,
         ${body.moveInInspection ? JSON.stringify(body.moveInInspection) : null}::jsonb
       )
-      RETURNING id, org_id, apartment_id, name, email, phone, whatsapp,
+      RETURNING id, org_id, apartment_id, application_id, user_id, name, email, phone, whatsapp,
         lease_start, lease_end, status, balance, docs_json, move_in_inspection_json,
         created_at, updated_at
     `
@@ -78,6 +97,14 @@ tenantsRouter.post('/', async (req, res, next) => {
       SET status = 'occupied', updated_at = now()
       WHERE id = ${body.apartmentId} AND org_id = ${req.orgId!}
     `
+
+    if (applicationId) {
+      await sql`
+        UPDATE applications
+        SET status = 'tenant', updated_at = now()
+        WHERE id = ${applicationId} AND org_id = ${req.orgId!}
+      `
+    }
 
     res.status(201).json({ data: rows[0] })
   } catch (err) {

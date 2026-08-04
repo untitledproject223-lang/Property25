@@ -5,6 +5,6 @@ export {
   KycForm,
   PaymentForm,
   LeaseForm,
-  CompletionForm,
+  SuccessForm,
   MoveInForm,
 } from './InquiryForm'

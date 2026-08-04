@@ -9,6 +9,7 @@ import {
   type DocumentMeta,
 } from '../data/api'
 import type { InvoiceBillingKind, InvoiceItemType } from '../data/types'
+import { invoiceReason } from '../data/invoiceHelpers'
 import { isUnitVacant } from '../data/unitHelpers'
 import { formatDate, formatMoney, statusTone } from '../data/utils'
 import './TenantDetail.css'
@@ -185,7 +186,7 @@ export default function UnitDetailPage() {
         dueDate: invoiceDueDate,
         billingKind,
         isRecurring: billingKind === 'recurring',
-        status: 'draft',
+        status: 'sent',
         items: [{ type, description, amount }],
         notes:
           billingKind === 'recurring'
@@ -590,9 +591,11 @@ export default function UnitDetailPage() {
                   <tr>
                     <th>Tenant</th>
                     <th>Kind</th>
+                    <th>Reason</th>
                     <th>Due</th>
                     <th>Total</th>
                     <th>Status</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -613,12 +616,21 @@ export default function UnitDetailPage() {
                             {kind}
                           </span>
                         </td>
+                        <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
                         <td>{formatDate(asString(inv.dueDate))}</td>
                         <td>{formatMoney(asNumber(inv.total))}</td>
                         <td>
                           <span className={`badge ${statusTone(asString(inv.status))}`}>
                             {asString(inv.status)}
                           </span>
+                        </td>
+                        <td>
+                          <Link
+                            className="btn btn-primary btn-compact"
+                            to={`/invoices/${asString(inv.id)}/view`}
+                          >
+                            View invoice
+                          </Link>
                         </td>
                       </tr>
                     )
@@ -712,10 +724,12 @@ export default function UnitDetailPage() {
                   <tr>
                     <th>Tenant</th>
                     <th>Kind</th>
+                    <th>Reason</th>
                     <th>Issued</th>
                     <th>Due</th>
                     <th>Total</th>
                     <th>Status</th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
@@ -727,6 +741,7 @@ export default function UnitDetailPage() {
                           ? 'Recurring'
                           : 'One-time'}
                       </td>
+                      <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
                       <td>{formatDate(asString(inv.issuedAt))}</td>
                       <td>{formatDate(asString(inv.dueDate))}</td>
                       <td>{formatMoney(asNumber(inv.total))}</td>
@@ -734,6 +749,14 @@ export default function UnitDetailPage() {
                         <span className={`badge ${statusTone(asString(inv.status))}`}>
                           {asString(inv.status)}
                         </span>
+                      </td>
+                      <td>
+                        <Link
+                          className="btn btn-primary btn-compact"
+                          to={`/invoices/${asString(inv.id)}/view`}
+                        >
+                          View invoice
+                        </Link>
                       </td>
                     </tr>
                   ))}
