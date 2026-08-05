@@ -62,6 +62,7 @@ Every row/document is scoped by `org_id` (multi-tenant).
 | Doc | Description |
 |-----|-------------|
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Branch → GitHub → Render API → Midpoint cPanel (live URL) |
+| [docs/DEPLOY.pdf](docs/DEPLOY.pdf) | Same deploy manual as a printable PDF |
 | [docs/MILESTONES.md](docs/MILESTONES.md) | Design → production milestones (M0–M5) |
 | [docs/PHASE1-DATA-ARCHITECTURE.md](docs/PHASE1-DATA-ARCHITECTURE.md) | How Neon + MongoDB operate together |
 | [docs/MEETING-SCRIPT.md](docs/MEETING-SCRIPT.md) | Team alignment meeting script |
