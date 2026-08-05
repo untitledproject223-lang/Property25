@@ -19,21 +19,28 @@ Your laptop
     │
     ├─ git push ──────────────────► GitHub (main / PR)
     │                                    │
-    │                                    ▼
-    │                              Render API auto-deploys
-    │                              (property25.onrender.com)
-    │
-    └─ npm run build:website
-         + FTP upload ────────────► Afrihost cPanel
-                                    (midpointblue.co.za/real/)
+    │                    ┌───────────────┴───────────────┐
+    │                    ▼                               ▼
+    │              Render API                      GitHub Actions
+    │         (property25.onrender.com)            build + FTP
+    │                                                    │
+    │                                                    ▼
+    │                                          Afrihost cPanel
+    │                                     (midpointblue.co.za/real/)
 ```
 
 | Piece | Host | Updates when… |
 |-------|------|----------------|
 | Backend API | Render | You merge/push to `main` (auto) |
-| Frontend UI | Midpoint cPanel | Someone **rebuilds** and **FTP uploads** `website/` |
+| Frontend UI | Midpoint cPanel | You merge/push UI changes to `main` (GitHub Action builds + FTP) — or run **Actions → Deploy Midpoint frontend → Run workflow** |
 
-**cPanel does not pull from GitHub.** Pushing a branch alone will **not** change https://midpointblue.co.za/real/ until the FTP step runs.
+Secrets required on the GitHub repo (Settings → Secrets and variables → Actions):
+
+| Secret | Example |
+|--------|---------|
+| `FTP_HOST` | `midpointblue.co.za` |
+| `FTP_USER` | `property25deploy@midpointblue.co.za` |
+| `FTP_PASSWORD` | *(ask team lead — never commit)* |
 
 Do **not** deploy this product to Azure.
 
@@ -64,7 +71,7 @@ git pull origin main
 ```
 
 **API:** Render rebuilds from `main` automatically (usually a few minutes).  
-**Frontend:** still needs the cPanel steps below if UI files changed.
+**Frontend:** GitHub Actions rebuilds and FTP-uploads to Midpoint when `src/` (or related frontend files) change. Check the **Actions** tab if the live site looks stale.
 
 ---
 
@@ -98,9 +105,9 @@ npm run dev        # terminal 2 — UI
 
 ---
 
-## 3. Push the live Midpoint UI (cPanel)
+## 3. Manual Midpoint deploy (fallback)
 
-Do this after UI changes are on `main` (or from the branch you intend to ship — usually `main`).
+Only needed if Actions is down or you must ship from a laptop.
 
 ### 3.1 Build
 
@@ -162,13 +169,14 @@ $env:FTP_PASS = "<ask-lead>"   # never commit this
 
 ## 4. Who does what
 
-| Change type | Git | Render (API) | Midpoint FTP |
-|-------------|-----|--------------|--------------|
-| Backend only (`server/…`) | PR → `main` | Auto | Not needed |
-| Frontend only (`src/…`) | PR → `main` | Usually none | **Required** |
-| Both | PR → `main` | Auto | **Required** |
+| Change type | Git | Render (API) | Midpoint (Actions FTP) |
+|-------------|-----|--------------|------------------------|
+| Backend only (`server/…`) | PR → `main` | Auto | Skipped (path filter) |
+| Frontend only (`src/…`) | PR → `main` | Usually none | **Auto** |
+| Both | PR → `main` | Auto | **Auto** |
+| Docs only | PR → `main` | None | Skipped |
 
-Prefer one person (or a short rotation) to own the Midpoint FTP step so credentials stay controlled.
+Prefer keeping FTP credentials only in GitHub Actions secrets.
 
 ---
 
@@ -176,8 +184,7 @@ Prefer one person (or a short rotation) to own the Midpoint FTP step so credenti
 
 - [ ] PR merged to `main` (or you built from the commit you mean to ship)
 - [ ] Render deploy finished green (API changes)
-- [ ] `npm run build:website` succeeded with `VITE_API_URL=https://property25.onrender.com`
-- [ ] FTP upload of full `website/` completed
+- [ ] **Actions → Deploy Midpoint frontend** finished green (UI changes)
 - [ ] Hard-refresh on https://midpointblue.co.za/real/#/login works
 - [ ] No secrets committed (`.env`, FTP password, Neon URL)
 
@@ -187,9 +194,9 @@ Prefer one person (or a short rotation) to own the Midpoint FTP step so credenti
 
 | Mistake | Result |
 |---------|--------|
-| Push branch, skip FTP | Midpoint still shows old UI |
-| Build without `.env.production` | UI may point at wrong/missing API |
-| Upload only `index.html` | Broken site (missing hashed JS/CSS/wasm) |
+| Push branch, skip merge to `main` | Midpoint / Render stay on old code |
+| Expect docs-only push to refresh Midpoint | Action path filter skips deploy (use **Run workflow**) |
+| Build without production API URL | UI may point at wrong/missing API |
 | Commit FTP password or `.env` | Security incident — rotate secrets |
 | Deploy to Azure | Out of scope — Midpoint + Render only |
 
@@ -201,12 +208,10 @@ Prefer one person (or a short rotation) to own the Midpoint FTP step so credenti
 # 1) Merge your PR to main, then:
 git checkout main && git pull origin main
 
-# 2) API is already deploying on Render if server/ changed.
+# 2) API deploys on Render if server/ changed.
+# 3) UI deploys via GitHub Actions if src/ (etc.) changed.
+#    Or: GitHub → Actions → Deploy Midpoint frontend → Run workflow
 
-# 3) Ship UI to Midpoint:
-npm run build:website
-# 4) FTP contents of website/ → property25deploy@midpointblue.co.za (remote /)
-
-# 5) Share:
+# 4) Share:
 # https://midpointblue.co.za/real/#/login
 ```

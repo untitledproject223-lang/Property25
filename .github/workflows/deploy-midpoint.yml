@@ -1,0 +1,55 @@
+name: Deploy Midpoint frontend
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig*.json'
+      - '.github/workflows/deploy-midpoint.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-midpoint
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and FTP to midpointblue.co.za/real
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build website
+        env:
+          VITE_API_URL: https://property25.onrender.com
+        run: npm run build:website
+
+      - name: Upload to Midpoint (FTP)
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_HOST }}
+          username: ${{ secrets.FTP_USER }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          local-dir: ./website/
+          server-dir: ./
+          protocol: ftp
+          dangerous-clean-slate: false
+          log-level: standard
