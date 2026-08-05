@@ -253,33 +253,7 @@ export default function ApplicationPage() {
         }
 
         setCompleted(remoteCompleted)
-        const nextActive = activeStageIndex(remoteCompleted, mergedForActive)
-
-        setCurrentIndex((prev) => {
-          const onShared = stageId === 'lease' || stageId === 'movein'
-          // Single-party steps: auto-load the next active step for waiting parties
-          if (!onShared && prev < nextActive) return nextActive
-          if (currentMode === 'waiting' && !onShared && prev !== nextActive) {
-            return nextActive
-          }
-          // Shared steps: only move forward after required parties clicked Next
-          if (
-            onShared &&
-            pendingAdvanceForStage(stageId, mergedForActive).length === 0 &&
-            prev < nextActive
-          ) {
-            return nextActive
-          }
-          if (
-            currentMode === 'observing' &&
-            onShared &&
-            pendingAdvanceForStage(stageId, mergedForActive).length === 0 &&
-            prev !== nextActive
-          ) {
-            return nextActive
-          }
-          return prev
-        })
+        // Do not auto-advance the visible step. Each party clicks Next to move forward.
       } catch {
         // ignore transient poll errors
       }
@@ -361,9 +335,13 @@ export default function ApplicationPage() {
         status: STAGE_STATUS[stageIdRef.current] ?? 'in_progress',
         formData: snapshot,
         completedStages: Array.from(completedRef.current),
-        apartmentId: asString(snapshot.apartmentId) || null,
-        applicantName: asString(snapshot.applicantName) || undefined,
-        applicantEmail: asString(snapshot.applicantEmail) || undefined,
+        ...(isAgent
+          ? {
+              apartmentId: asString(snapshot.apartmentId) || null,
+              applicantName: asString(snapshot.applicantName) || undefined,
+              applicantEmail: asString(snapshot.applicantEmail) || undefined,
+            }
+          : {}),
         applicantPhone: asString(snapshot.applicantPhone) || null,
       })
       const remoteForm = (saved.data.formData ?? {}) as Record<string, unknown>
@@ -493,9 +471,13 @@ export default function ApplicationPage() {
       completenessPct,
       formData: nextForm,
       completedStages: Array.from(nextCompleted),
-      apartmentId: asString(nextForm.apartmentId) || null,
-      applicantName: asString(nextForm.applicantName) || undefined,
-      applicantEmail: asString(nextForm.applicantEmail) || undefined,
+      ...(isAgent
+        ? {
+            apartmentId: asString(nextForm.apartmentId) || null,
+            applicantName: asString(nextForm.applicantName) || undefined,
+            applicantEmail: asString(nextForm.applicantEmail) || undefined,
+          }
+        : {}),
       applicantPhone: asString(nextForm.applicantPhone) || null,
     })
   }
@@ -587,9 +569,13 @@ export default function ApplicationPage() {
         status: STAGE_STATUS[currentStage.id] ?? 'in_progress',
         formData: nextForm,
         completedStages: Array.from(completed),
-        apartmentId: asString(nextForm.apartmentId) || null,
-        applicantName: asString(nextForm.applicantName) || undefined,
-        applicantEmail: asString(nextForm.applicantEmail) || undefined,
+        ...(isAgent
+          ? {
+              apartmentId: asString(nextForm.apartmentId) || null,
+              applicantName: asString(nextForm.applicantName) || undefined,
+              applicantEmail: asString(nextForm.applicantEmail) || undefined,
+            }
+          : {}),
         applicantPhone: asString(nextForm.applicantPhone) || null,
       })
       const remoteForm = (saved.data.formData ?? nextForm) as Record<string, unknown>

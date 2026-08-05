@@ -391,28 +391,33 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
     const body = patchSchema.parse(req.body)
     const auth = req.auth!
 
+    // Only agents may change apartment / core applicant identity fields.
+    // Tenants/landlords may still save form progress; ignore identity fields from them.
+    if (auth.role !== 'admin' && auth.role !== 'agent') {
+      if (
+        body.apartmentId !== undefined ||
+        body.applicantName !== undefined ||
+        body.applicantEmail !== undefined
+      ) {
+        // Soft-ignore identity updates from non-agents instead of hard-failing progress saves.
+        delete (body as { apartmentId?: unknown }).apartmentId
+        delete (body as { applicantName?: unknown }).applicantName
+        delete (body as { applicantEmail?: unknown }).applicantEmail
+      }
+    }
+
     const formApartmentId =
       body.formData && typeof body.formData === 'object' && !Array.isArray(body.formData)
         ? (body.formData as Record<string, unknown>).apartmentId
         : undefined
     const resolvedApartmentId =
-      body.apartmentId !== undefined && body.apartmentId !== null
-        ? body.apartmentId
-        : typeof formApartmentId === 'string' && formApartmentId.length > 0
-          ? formApartmentId
-          : null
-
-    // Only agents may change apartment / core applicant identity fields
-    if (
-      (resolvedApartmentId ||
-        body.apartmentId !== undefined ||
-        body.applicantName !== undefined ||
-        body.applicantEmail !== undefined) &&
-      auth.role !== 'admin' &&
-      auth.role !== 'agent'
-    ) {
-      throw new AppError(403, 'Only agents can update application identity fields')
-    }
+      auth.role === 'admin' || auth.role === 'agent'
+        ? body.apartmentId !== undefined && body.apartmentId !== null
+          ? body.apartmentId
+          : typeof formApartmentId === 'string' && formApartmentId.length > 0
+            ? formApartmentId
+            : null
+        : null
 
     if (resolvedApartmentId) {
       const apt = await sql`
@@ -429,8 +434,16 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
         status = COALESCE(${body.status ?? null}, status),
         completeness_pct = COALESCE(${body.completenessPct ?? null}, completeness_pct),
         apartment_id = COALESCE(${resolvedApartmentId}, apartment_id),
-        applicant_name = COALESCE(${body.applicantName ?? null}, applicant_name),
-        applicant_email = COALESCE(${body.applicantEmail ?? null}, applicant_email),
+        applicant_name = COALESCE(${
+          auth.role === 'admin' || auth.role === 'agent'
+            ? (body.applicantName ?? null)
+            : null
+        }, applicant_name),
+        applicant_email = COALESCE(${
+          auth.role === 'admin' || auth.role === 'agent'
+            ? (body.applicantEmail ?? null)
+            : null
+        }, applicant_email),
         applicant_phone = COALESCE(${body.applicantPhone ?? null}, applicant_phone),
         updated_at = now()
       WHERE id = ${id} AND org_id = ${req.orgId!}
