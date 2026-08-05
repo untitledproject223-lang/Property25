@@ -1291,100 +1291,37 @@ function PartySignStatusBoard({
   )
 }
 
-function signatureFieldsReady(name: string, date: string, mark: string) {
-  return Boolean(name.trim() && date.trim() && mark.trim())
-}
-
-function LeaseSignatureBlock({
+function LeaseConfirmBlock({
   legend,
   confirmLabel,
-  nameKey,
-  dateKey,
-  markKey,
   doneKey,
-  namePlaceholder,
   enabled,
   data,
   onChange,
 }: {
   legend: string
   confirmLabel: string
-  nameKey: string
-  dateKey: string
-  markKey: string
   doneKey: string
-  namePlaceholder: string
   enabled: boolean
   data: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
 }) {
-  const name = str(data, nameKey)
-  const date = str(data, dateKey)
-  const mark = str(data, markKey)
   const done = bool(data, doneKey)
-  const ready = signatureFieldsReady(name, date, mark)
-
-  useEffect(() => {
-    if (!ready && done) {
-      onChange(doneKey, false)
-    }
-  }, [ready, done, doneKey, onChange])
-
-  function updateField(key: string, value: string) {
-    onChange(key, value)
-    const nextName = key === nameKey ? value : name
-    const nextDate = key === dateKey ? value : date
-    const nextMark = key === markKey ? value : mark
-    if (!signatureFieldsReady(nextName, nextDate, nextMark) && done) {
-      onChange(doneKey, false)
-    }
-  }
-
   return (
     <fieldset className="signature-block" disabled={!enabled}>
       <legend>{legend}</legend>
-      <label className="field">
-        <span className="field-label">Full legal name</span>
-        <input
-          type="text"
-          value={name}
-          onChange={(e) => updateField(nameKey, e.target.value)}
-          placeholder={namePlaceholder}
-        />
-      </label>
-      <label className="field">
-        <span className="field-label">Date signed</span>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => updateField(dateKey, e.target.value)}
-        />
-      </label>
-      <label className="field field-span">
-        <span className="field-label">Type in signature</span>
-        <input
-          className="signature-input"
-          type="text"
-          value={mark}
-          onChange={(e) => updateField(markKey, e.target.value)}
-          placeholder="Sign by typing your name"
-        />
-      </label>
-      <label className={`check-field${!ready ? ' check-field-locked' : ''}`}>
+      <label className="check-field">
         <input
           type="checkbox"
-          disabled={!ready}
           checked={done}
-          onChange={(e) => {
-            if (!ready) return
-            onChange(doneKey, e.target.checked)
-          }}
+          onChange={(e) => onChange(doneKey, e.target.checked)}
         />
         <span>{confirmLabel}</span>
       </label>
-      {enabled && !ready ? (
+      {enabled ? (
         <span className="field-hint field-span">
-          Complete full legal name, date signed, and typed signature before confirming.
+          Check this box to confirm your signature. Then use Next to continue — the page
+          will not advance automatically.
         </span>
       ) : null}
     </fieldset>
@@ -1401,11 +1338,11 @@ export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
-        <strong>Lease signing — all parties.</strong>
+        <strong>Lease signing — tenant and landlord.</strong>
         <span>
-          Complete your own signature block, then click Next. You do not need to wait for
-          the others to sign first. Move-in unlocks only after tenant, landlord, and agent
-          have each clicked Next.
+          Confirm your signature with the checkbox, then click Next. Move-in unlocks only
+          after both the tenant and the landlord have clicked Next. The agent is not
+          required to sign.
         </span>
       </div>
 
@@ -1468,39 +1405,19 @@ export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
         </div>
 
         <div className="signature-grid">
-          <LeaseSignatureBlock
+          <LeaseConfirmBlock
             legend="Applicant signature"
-            confirmLabel="Applicant has signed the lease PDF"
-            nameKey="signApplicantName"
-            dateKey="signApplicantDate"
-            markKey="signApplicantMark"
+            confirmLabel="I confirm that I have signed the lease agreement"
             doneKey="signApplicantDone"
-            namePlaceholder={str(data, 'applicantName') || 'Tenant full name'}
             enabled={canTenant}
             data={data}
             onChange={onChange}
           />
-          <LeaseSignatureBlock
+          <LeaseConfirmBlock
             legend="Landlord signature"
-            confirmLabel="Landlord has signed the lease PDF"
-            nameKey="signLandlordName"
-            dateKey="signLandlordDate"
-            markKey="signLandlordMark"
+            confirmLabel="I confirm that I have signed the lease agreement"
             doneKey="signLandlordDone"
-            namePlaceholder="Landlord full name"
             enabled={canLandlord}
-            data={data}
-            onChange={onChange}
-          />
-          <LeaseSignatureBlock
-            legend="Agent signature"
-            confirmLabel="Agent has signed the lease PDF"
-            nameKey="signAgentName"
-            dateKey="signAgentDate"
-            markKey="signAgentMark"
-            doneKey="signAgentDone"
-            namePlaceholder={str(data, 'agentName') || 'Agent full name'}
-            enabled={canAgent}
             data={data}
             onChange={onChange}
           />
@@ -1535,7 +1452,7 @@ export function SuccessForm({ data }: FormProps) {
         </div>
       </dl>
       <ul className="success-panel-checks">
-        <li>Lease signed by all parties</li>
+        <li>Lease signed by tenant and landlord</li>
         <li>Move-in inspection recorded</li>
         <li>Application closed successfully</li>
       </ul>
@@ -1570,21 +1487,20 @@ const INSPECTION_ITEMS = [
 export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
   const canAgent = !viewerRole || viewerRole === 'admin' || viewerRole === 'agent'
   const canTenant = !viewerRole || viewerRole === 'tenant'
-  const canLandlord = !viewerRole || viewerRole === 'landlord'
   const statuses = moveInSignStatuses(data)
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
-        <strong>Move-in inspection — agent, tenant & landlord.</strong>
+        <strong>Move-in inspection — agent and tenant.</strong>
         <span>
-          Complete your sign-off, then click Next. You do not need to wait for the others
-          first. The success page opens only after all three parties have clicked Next.
+          The agent completes the inspection form. The tenant only acknowledges the recorded
+          condition. Only the agent clicks Next, which opens the success page for everyone.
         </span>
       </div>
 
       <PartySignStatusBoard statuses={statuses} />
 
-      <fieldset className="form-section">
+      <fieldset className="form-section" disabled={!canAgent}>
         <legend>Inspection details</legend>
         <label className="field">
           <span className="field-label">Inspection date</span>
@@ -1643,7 +1559,7 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
         </label>
       </fieldset>
 
-      <fieldset className="form-section inspection-section">
+      <fieldset className="form-section inspection-section" disabled={!canAgent}>
         <legend>Apartment condition checklist</legend>
         <p className="section-lead">
           Rate each item and note any defects. This record is the move-in baseline.
@@ -1662,7 +1578,7 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
       </fieldset>
 
       <fieldset className="form-section">
-        <legend>Photos & sign-off</legend>
+        <legend>Photos &amp; sign-off</legend>
         <FileField
           id="inspectionPhotos"
           label="Move-in photos"
@@ -1670,19 +1586,24 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
           accept="image/*,.pdf"
           files={fileNames(data, 'inspectionPhotos')}
           uploading={bool(data, 'inspectionPhotosUploading')}
-          onChange={makeMultiFileHandler(
-            data,
-            onChange,
-            'inspectionPhotos',
-            'inspectionPhotos',
-          )}
+          onChange={
+            canAgent
+              ? makeMultiFileHandler(
+                  data,
+                  onChange,
+                  'inspectionPhotos',
+                  'inspectionPhotos',
+                )
+              : () => undefined
+          }
         />
         <label className="field field-span">
           <span className="field-label">General comments</span>
           <textarea
             rows={4}
             value={str(data, 'inspectionNotes')}
-            onChange={(e) => onChange('inspectionNotes', e.target.value)}
+            onChange={(e) => canAgent && onChange('inspectionNotes', e.target.value)}
+            readOnly={!canAgent}
             placeholder="Overall condition summary, outstanding issues, keys handed over…"
           />
         </label>
@@ -1704,15 +1625,12 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
           />
           <span>Tenant acknowledges the recorded condition of the apartment</span>
         </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            disabled={!canLandlord}
-            checked={bool(data, 'inspectionLandlordSigned')}
-            onChange={(e) => onChange('inspectionLandlordSigned', e.target.checked)}
-          />
-          <span>Landlord acknowledges the move-in inspection record</span>
-        </label>
+        {canTenant && !canAgent ? (
+          <span className="field-hint">
+            Check the box above to acknowledge. Only the agent can click Next to finish
+            this application.
+          </span>
+        ) : null}
       </fieldset>
     </div>
   )

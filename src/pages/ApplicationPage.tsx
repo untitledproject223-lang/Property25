@@ -147,9 +147,18 @@ export default function ApplicationPage() {
         ? 'view'
         : isActiveStep
           ? isSharedStep
-            ? iHaveAdvanced
-              ? 'observing'
-              : 'edit'
+            ? !canEdit
+              ? 'waiting'
+              : // Agent stays on lease to manage the PDF (not part of Next unlock).
+                currentStage.id === 'lease' &&
+                  (user?.role === 'admin' || user?.role === 'agent')
+                ? 'edit'
+                : // Tenant stays on move-in only to acknowledge (agent alone clicks Next).
+                  currentStage.id === 'movein' && user?.role === 'tenant'
+                  ? 'edit'
+                  : iHaveAdvanced
+                    ? 'observing'
+                    : 'edit'
             : canEdit && iAmWaitingParty
               ? 'edit'
               : 'waiting'
@@ -427,11 +436,26 @@ export default function ApplicationPage() {
         return 'Both consent checkboxes are required before continuing.'
       }
     }
-    if (currentStage.id === 'lease' || currentStage.id === 'movein') {
-      if (!partyHasSigned(currentStage.id, formData, user?.role)) {
-        return currentStage.id === 'lease'
-          ? 'Complete your signature (full name, date, typed signature, and confirm checkbox) before continuing.'
-          : 'Confirm your move-in sign-off checkbox before clicking Next.'
+    if (currentStage.id === 'lease') {
+      if (!partyHasSigned('lease', formData, user?.role)) {
+        return 'Confirm your lease signature checkbox before continuing.'
+      }
+      if (user?.role === 'admin' || user?.role === 'agent') {
+        return 'Lease signing is confirmed by the tenant and landlord. You can upload the lease PDF, but only they click Next to unlock move-in.'
+      }
+    }
+    if (currentStage.id === 'movein') {
+      if (user?.role === 'tenant') {
+        return 'Acknowledge the apartment condition with the checkbox. Only the agent can click Next to finish.'
+      }
+      if (user?.role === 'landlord') {
+        return 'Move-in is completed by the agent and tenant. Please wait for the agent to continue.'
+      }
+      if (!partyHasSigned('movein', formData, 'agent')) {
+        return 'Confirm the inspection is accurate before clicking Next.'
+      }
+      if (!partyHasSigned('movein', formData, 'tenant')) {
+        return 'The tenant must acknowledge the recorded condition before you can continue.'
       }
     }
     return null
@@ -631,7 +655,7 @@ export default function ApplicationPage() {
       let nextCompleted = new Set(completed)
 
       if (sharedStageId) {
-        // Record this party's Next/Complete click; stage unlocks only when all three have.
+        // Lease: tenant/landlord Next. Move-in: agent Next unlocks success for everyone.
         nextForm = markPartyAdvanced(sharedStageId, nextForm, user?.role)
         const stillPending = pendingAdvanceForStage(sharedStageId, nextForm)
         if (stillPending.length === 0) {
@@ -736,8 +760,30 @@ export default function ApplicationPage() {
       return advancePending.length === 0 ? 'Continue to next step' : 'Waiting for others…'
     }
     if (mode === 'view' && !isActiveStep) return 'Go to current step'
+    if (currentStage.id === 'movein' && user?.role === 'tenant') {
+      return 'Waiting for agent…'
+    }
+    if (currentStage.id === 'lease' && (user?.role === 'admin' || user?.role === 'agent')) {
+      return 'Waiting for signatures…'
+    }
     return 'Next'
   })()
+
+  const nextDisabled =
+    saving ||
+    mode === 'waiting' ||
+    (mode === 'observing' && isSharedStep && advancePending.length > 0) ||
+    (editable &&
+      currentStage.id === 'lease' &&
+      (user?.role === 'admin' ||
+        user?.role === 'agent' ||
+        !partyHasSigned('lease', formData, user?.role))) ||
+    (editable &&
+      currentStage.id === 'movein' &&
+      (user?.role === 'tenant' ||
+        user?.role === 'landlord' ||
+        !partyHasSigned('movein', formData, 'agent') ||
+        !partyHasSigned('movein', formData, 'tenant')))
 
   return (
     <div className="app apply-page">
@@ -854,11 +900,7 @@ export default function ApplicationPage() {
               <button
                 type="button"
                 className="btn btn-primary"
-                disabled={
-                  saving ||
-                  mode === 'waiting' ||
-                  (mode === 'observing' && isSharedStep && advancePending.length > 0)
-                }
+                disabled={nextDisabled}
                 onClick={() => void goNext()}
               >
                 {nextLabel}

@@ -93,10 +93,10 @@ export const STAGES: StageDefinition[] = [
     title: 'Lease Agreement Signing',
     shortTitle: 'Lease',
     description:
-      'Applicant, landlord, and agent review and sign the lease PDF online.',
+      'Tenant and landlord confirm they have signed the lease. The agent may upload the lease PDF but is not required to sign.',
     phase: 'legal',
     editorRole: 'shared',
-    editorLabel: 'All parties',
+    editorLabel: 'Tenant & landlord sign',
     canEdit: ['admin', 'agent', 'tenant', 'landlord'],
   },
   {
@@ -105,11 +105,11 @@ export const STAGES: StageDefinition[] = [
     title: 'Move-in Inspection',
     shortTitle: 'Move-in',
     description:
-      'Record the condition of the apartment before the tenant moves in for comparison at move-out.',
+      'Agent records the apartment condition. Tenant acknowledges the record. Only the agent continues to success.',
     phase: 'closing',
     editorRole: 'shared',
-    editorLabel: 'Agent, tenant & landlord',
-    canEdit: ['admin', 'agent', 'tenant', 'landlord'],
+    editorLabel: 'Agent completes · tenant acknowledges',
+    canEdit: ['admin', 'agent', 'tenant'],
   },
   {
     id: 'success',
@@ -180,13 +180,6 @@ export function leaseSignatureStatuses(
       nameKey: 'signLandlordName',
       doneKey: 'signLandlordDone',
     },
-    {
-      role: 'agent',
-      label: 'Agent',
-      done: bool(formData, 'signAgentDone'),
-      nameKey: 'signAgentName',
-      doneKey: 'signAgentDone',
-    },
   ]
 }
 
@@ -200,13 +193,6 @@ export function moveInSignStatuses(
       done: bool(formData, 'inspectionTenantSigned'),
       nameKey: 'inspectionTenantSigned',
       doneKey: 'inspectionTenantSigned',
-    },
-    {
-      role: 'landlord',
-      label: 'Landlord',
-      done: bool(formData, 'inspectionLandlordSigned'),
-      nameKey: 'inspectionLandlordSigned',
-      doneKey: 'inspectionLandlordSigned',
     },
     {
       role: 'agent',
@@ -249,31 +235,14 @@ export function partyHasSigned(
   const party = sharedPartyRole(role)
   if (!party) return false
   if (stageId === 'lease') {
-    if (party === 'tenant') {
-      return (
-        bool(formData, 'signApplicantDone') &&
-        Boolean(String(formData.signApplicantName ?? '').trim()) &&
-        Boolean(String(formData.signApplicantDate ?? '').trim()) &&
-        Boolean(String(formData.signApplicantMark ?? '').trim())
-      )
-    }
-    if (party === 'landlord') {
-      return (
-        bool(formData, 'signLandlordDone') &&
-        Boolean(String(formData.signLandlordName ?? '').trim()) &&
-        Boolean(String(formData.signLandlordDate ?? '').trim()) &&
-        Boolean(String(formData.signLandlordMark ?? '').trim())
-      )
-    }
-    return (
-      bool(formData, 'signAgentDone') &&
-      Boolean(String(formData.signAgentName ?? '').trim()) &&
-      Boolean(String(formData.signAgentDate ?? '').trim()) &&
-      Boolean(String(formData.signAgentMark ?? '').trim())
-    )
+    // Agent is not required to sign the lease.
+    if (party === 'agent') return true
+    if (party === 'tenant') return bool(formData, 'signApplicantDone')
+    return bool(formData, 'signLandlordDone')
   }
+  // Move-in: landlord does not participate; tenant ack + agent confirm.
+  if (party === 'landlord') return true
   if (party === 'tenant') return bool(formData, 'inspectionTenantSigned')
-  if (party === 'landlord') return bool(formData, 'inspectionLandlordSigned')
   return bool(formData, 'inspectionAgentSigned')
 }
 
@@ -284,6 +253,14 @@ export function partyHasAdvanced(
 ): boolean {
   const party = sharedPartyRole(role)
   if (!party) return false
+  // Move-in: only the agent clicks Next to unlock success.
+  if (stageId === 'movein') {
+    if (party === 'agent') return bool(formData, advanceKeyFor(stageId, 'agent'))
+    // Tenant acknowledges via checkbox only; landlord does not act on this step.
+    return true
+  }
+  // Lease: agent does not need to click Next for progress.
+  if (party === 'agent') return true
   return bool(formData, advanceKeyFor(stageId, party))
 }
 
@@ -295,10 +272,12 @@ export function markPartyAdvanced(
 ): Record<string, unknown> {
   const party = sharedPartyRole(role)
   if (!party) return formData
+  if (stageId === 'lease' && party === 'agent') return formData
+  if (stageId === 'movein' && party !== 'agent') return formData
   return { ...formData, [advanceKeyFor(stageId, party)]: true }
 }
 
-/** Parties that still need to complete their signature block. */
+/** Parties that still need to complete their signature / acknowledgement. */
 export function pendingSignaturesForStage(
   stageId: StageId,
   formData: Record<string, unknown>,
@@ -307,13 +286,11 @@ export function pendingSignaturesForStage(
     const pending: PortalRole[] = []
     if (!partyHasSigned('lease', formData, 'tenant')) pending.push('tenant')
     if (!partyHasSigned('lease', formData, 'landlord')) pending.push('landlord')
-    if (!partyHasSigned('lease', formData, 'agent')) pending.push('agent')
     return pending
   }
   if (stageId === 'movein') {
     const pending: PortalRole[] = []
     if (!partyHasSigned('movein', formData, 'tenant')) pending.push('tenant')
-    if (!partyHasSigned('movein', formData, 'landlord')) pending.push('landlord')
     if (!partyHasSigned('movein', formData, 'agent')) pending.push('agent')
     return pending
   }
@@ -321,8 +298,8 @@ export function pendingSignaturesForStage(
 }
 
 /**
- * Parties that still need to click Next (step 6) or Complete (step 8).
- * Stage unlocks only after every party has advanced — not merely signed.
+ * Parties that still need to click Next to unlock the following stage.
+ * Lease: tenant + landlord. Move-in: agent only.
  */
 export function pendingAdvanceForStage(
   stageId: StageId,
@@ -332,15 +309,11 @@ export function pendingAdvanceForStage(
     const pending: PortalRole[] = []
     if (!partyHasAdvanced('lease', formData, 'tenant')) pending.push('tenant')
     if (!partyHasAdvanced('lease', formData, 'landlord')) pending.push('landlord')
-    if (!partyHasAdvanced('lease', formData, 'agent')) pending.push('agent')
     return pending
   }
   if (stageId === 'movein') {
-    const pending: PortalRole[] = []
-    if (!partyHasAdvanced('movein', formData, 'tenant')) pending.push('tenant')
-    if (!partyHasAdvanced('movein', formData, 'landlord')) pending.push('landlord')
-    if (!partyHasAdvanced('movein', formData, 'agent')) pending.push('agent')
-    return pending
+    if (!partyHasAdvanced('movein', formData, 'agent')) return ['agent']
+    return []
   }
   return []
 }
@@ -363,7 +336,7 @@ export function isStageFullyComplete(
   formData: Record<string, unknown>,
 ): boolean {
   if (stageId === 'lease' || stageId === 'movein') {
-    // All parties must sign and click Next — not signature-only.
+    // Lease: tenant + landlord Next. Move-in: agent Next only.
     return pendingAdvanceForStage(stageId, formData).length === 0
   }
   if (stageId === 'success') {

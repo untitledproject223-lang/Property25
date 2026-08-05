@@ -54,8 +54,16 @@ function SharedSigningOutline({
       : moveInSignStatuses(formData)
   const signed = statuses.filter((s) => s.done)
   const pendingSign = statuses.filter((s) => !s.done)
-  const continued = statuses.filter((s) => partyHasAdvanced(stageId, formData, s.role))
-  const pendingNext = statuses.filter((s) => !partyHasAdvanced(stageId, formData, s.role))
+  const nextParties =
+    stageId === 'lease'
+      ? statuses
+      : statuses.filter((s) => s.role === 'agent')
+  const continued = nextParties.filter((s) =>
+    partyHasAdvanced(stageId, formData, s.role),
+  )
+  const pendingNext = nextParties.filter(
+    (s) => !partyHasAdvanced(stageId, formData, s.role),
+  )
 
   return (
     <div className="stage-sign-outline" role="status">
@@ -65,9 +73,6 @@ function SharedSigningOutline({
           signed.map((s) => (
             <span key={s.role} className="stage-sign-chip signed">
               {s.label}
-              {stageId === 'lease' && typeof formData[s.nameKey] === 'string' && formData[s.nameKey]
-                ? ` (${String(formData[s.nameKey])})`
-                : ''}
             </span>
           ))
         ) : (
@@ -83,11 +88,13 @@ function SharedSigningOutline({
             </span>
           ))
         ) : (
-          <span className="stage-sign-empty">None — everyone has signed</span>
+          <span className="stage-sign-empty">None — required parties have signed</span>
         )}
       </p>
       <p className="stage-sign-outline-line">
-        <span className="stage-sign-label signed">Clicked Next</span>
+        <span className="stage-sign-label signed">
+          {stageId === 'movein' ? 'Agent clicked Next' : 'Clicked Next'}
+        </span>
         {continued.length > 0 ? (
           continued.map((s) => (
             <span key={s.role} className="stage-sign-chip signed">
@@ -107,7 +114,7 @@ function SharedSigningOutline({
             </span>
           ))
         ) : (
-          <span className="stage-sign-empty">None — everyone has continued</span>
+          <span className="stage-sign-empty">None — required parties have continued</span>
         )}
       </p>
     </div>
@@ -184,10 +191,14 @@ export function StagePanel({
 
         {stage.id === 'success' ? null : allAdvanced ? (
           <div className="stage-complete-banner" role="status">
-            <strong>Everyone has signed and clicked Next</strong>
+            <strong>
+              {stage.id === 'lease'
+                ? 'Tenant and landlord have signed and clicked Next'
+                : 'Agent has completed move-in'}
+            </strong>
             <span>
               {stage.id === 'lease'
-                ? 'Move-in inspection is now available for all parties.'
+                ? 'Move-in inspection is now available.'
                 : 'The success confirmation page is now available for all parties.'}
             </span>
           </div>
@@ -206,21 +217,26 @@ export function StagePanel({
               You clicked Next. Still waiting on {formatPartyList(advancePending)}
             </strong>
             <span>
-              Others can still sign and click Next. This page updates when they do — the
-              next step unlocks only after all three parties continue.
+              {stage.id === 'lease'
+                ? 'The next step unlocks after both the tenant and the landlord click Next.'
+                : 'The success page opens when the agent clicks Next.'}
             </span>
           </div>
         ) : isShared && isActiveStep ? (
           <div className="stage-partial-banner" role="status">
             <strong>
-              {signaturePending.length > 0
-                ? 'Sign your section, then click Next'
-                : 'Click Next to continue'}
+              {stage.id === 'movein' && (viewerRole === 'tenant')
+                ? 'Acknowledge the apartment condition'
+                : signaturePending.length > 0
+                  ? 'Confirm your signature, then click Next'
+                  : 'Click Next to continue'}
             </strong>
             <span>
-              You do not need to wait for the other parties to sign before clicking Next.
-              The next step unlocks only after tenant, landlord, and agent have each
-              clicked Next.
+              {stage.id === 'lease'
+                ? 'Checking the signature box does not advance the page. Next becomes available after you confirm, and move-in unlocks after both tenant and landlord click Next.'
+                : viewerRole === 'tenant'
+                  ? 'Check the acknowledgement box. Only the agent can click Next to finish.'
+                  : 'Complete the inspection, confirm accuracy, and click Next once the tenant has acknowledged. That moves everyone to success.'}
             </span>
           </div>
         ) : (
