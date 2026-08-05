@@ -89,20 +89,14 @@ function withSharedStageCompletion(
   stages: string[],
 ): string[] {
   const next = new Set(stages)
-  // Unlock only after every party has clicked Next / Complete (not merely signed).
-  if (
-    isDoneFlag(form.leaseNextTenant) &&
-    isDoneFlag(form.leaseNextLandlord) &&
-    isDoneFlag(form.leaseNextAgent)
-  ) {
+  // Lease unlocks after tenant + landlord click Next (agent is not required).
+  if (isDoneFlag(form.leaseNextTenant) && isDoneFlag(form.leaseNextLandlord)) {
     next.add('lease')
   }
-  if (
-    isDoneFlag(form.moveinNextTenant) &&
-    isDoneFlag(form.moveinNextLandlord) &&
-    isDoneFlag(form.moveinNextAgent)
-  ) {
+  // Move-in unlocks when the agent clicks Next.
+  if (isDoneFlag(form.moveinNextAgent)) {
     next.add('movein')
+    next.add('success')
   }
   return Array.from(next)
 }

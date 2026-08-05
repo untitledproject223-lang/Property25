@@ -32,6 +32,43 @@ function asString(value: unknown) {
   return typeof value === 'string' ? value : ''
 }
 
+function isDoneFlag(value: unknown): boolean {
+  return value === true || value === 'true' || value === 1 || value === '1'
+}
+
+/** Flags that must sync live across tenant / landlord / agent on shared steps. */
+const SHARED_SYNC_KEYS = [
+  'signApplicantDone',
+  'signLandlordDone',
+  'signAgentDone',
+  'inspectionTenantSigned',
+  'inspectionLandlordSigned',
+  'inspectionAgentSigned',
+  'leaseNextTenant',
+  'leaseNextLandlord',
+  'leaseNextAgent',
+  'moveinNextTenant',
+  'moveinNextLandlord',
+  'moveinNextAgent',
+] as const
+
+type SharedSyncKey = (typeof SHARED_SYNC_KEYS)[number]
+
+function isSharedSyncKey(key: string): key is SharedSyncKey {
+  return (SHARED_SYNC_KEYS as readonly string[]).includes(key)
+}
+
+function mergeSharedFlags(
+  local: Record<string, unknown>,
+  remote: Record<string, unknown>,
+): Record<string, unknown> {
+  const merged = { ...local, ...remote }
+  for (const key of SHARED_SYNC_KEYS) {
+    merged[key] = isDoneFlag(local[key]) || isDoneFlag(remote[key])
+  }
+  return merged
+}
+
 const STAGE_STATUS: Record<StageId, string> = {
   inquiry: 'in_progress',
   documents: 'in_progress',
@@ -175,43 +212,12 @@ export default function ApplicationPage() {
   formDataRef.current = formData
 
   // Sync progress across parties: single-party steps unlock the next step for everyone;
-  // shared steps (lease / move-in) sync signatures until all parties are done.
+  // shared steps (lease / move-in) sync signatures until required parties are done.
   useEffect(() => {
     const applicationId = asString(formData.applicationId) || routeId
     if (!applicationId) return
 
     let cancelled = false
-
-    function ownSignatureKeys(): string[] {
-      if (user?.role === 'tenant') {
-        return [
-          'signApplicantDone',
-          'signApplicantName',
-          'signApplicantDate',
-          'signApplicantMark',
-          'inspectionTenantSigned',
-        ]
-      }
-      if (user?.role === 'landlord') {
-        return [
-          'signLandlordDone',
-          'signLandlordName',
-          'signLandlordDate',
-          'signLandlordMark',
-          'inspectionLandlordSigned',
-        ]
-      }
-      if (user?.role === 'admin' || user?.role === 'agent') {
-        return [
-          'signAgentDone',
-          'signAgentName',
-          'signAgentDate',
-          'signAgentMark',
-          'inspectionAgentSigned',
-        ]
-      }
-      return []
-    }
 
     async function refreshProgress() {
       try {
@@ -220,7 +226,6 @@ export default function ApplicationPage() {
         const remoteForm = (result.data.formData ?? {}) as Record<string, unknown>
         const stages = (result.data.completedStages ?? []) as string[]
         const remoteCompleted = new Set(stages.filter(Boolean) as StageId[])
-        const ownKeys = ownSignatureKeys()
         const currentMode = modeRef.current
         const stageId = stageIdRef.current
         const pullingForm =
@@ -230,45 +235,16 @@ export default function ApplicationPage() {
           stageId === 'movein'
 
         const prevForm = formDataRef.current
-        const mergedForActive: Record<string, unknown> = {
-          ...prevForm,
-          ...remoteForm,
-          applicationId,
-        }
-        for (const key of ownKeys) {
-          const local = prevForm[key]
-          const remote = remoteForm[key]
-          if (key.endsWith('Done') || key.endsWith('Signed')) {
-            mergedForActive[key] = local === true || remote === true || remote === 'true'
-          } else if (local !== undefined && local !== '') {
-            mergedForActive[key] = local
-          }
-        }
-        for (const key of [
-          'signApplicantDone',
-          'signLandlordDone',
-          'signAgentDone',
-          'inspectionTenantSigned',
-          'inspectionLandlordSigned',
-          'inspectionAgentSigned',
-          'leaseNextTenant',
-          'leaseNextLandlord',
-          'leaseNextAgent',
-          'moveinNextTenant',
-          'moveinNextLandlord',
-          'moveinNextAgent',
-        ] as const) {
-          mergedForActive[key] =
-            prevForm[key] === true ||
-            remoteForm[key] === true ||
-            remoteForm[key] === 'true'
-        }
+        const mergedForActive = mergeSharedFlags(
+          { ...prevForm, applicationId },
+          remoteForm,
+        )
 
         if (pullingForm) {
           setFormData(mergedForActive)
         }
 
-        // Shared steps complete only when every party clicked Next/Complete
+        // Shared steps complete when required parties have clicked Next
         if (
           (stageId === 'lease' || stageId === 'movein') &&
           pendingAdvanceForStage(stageId, mergedForActive).length === 0
@@ -286,7 +262,7 @@ export default function ApplicationPage() {
           if (currentMode === 'waiting' && !onShared && prev !== nextActive) {
             return nextActive
           }
-          // Shared steps: only move forward after ALL parties clicked Next/Complete
+          // Shared steps: only move forward after required parties clicked Next
           if (
             onShared &&
             pendingAdvanceForStage(stageId, mergedForActive).length === 0 &&
@@ -310,14 +286,17 @@ export default function ApplicationPage() {
     }
 
     void refreshProgress()
-    const timer = window.setInterval(() => void refreshProgress(), 4000)
+    // Shared signature steps need faster refresh so parties see each other's confirms.
+    const intervalMs =
+      stageIdRef.current === 'lease' || stageIdRef.current === 'movein' ? 2000 : 4000
+    const timer = window.setInterval(() => void refreshProgress(), intervalMs)
     return () => {
       cancelled = true
       window.clearInterval(timer)
     }
-  }, [routeId, formData.applicationId, user?.role])
+  }, [routeId, formData.applicationId, user?.role, currentStage.id])
 
-  // When all parties have clicked Next/Complete, mark the shared stage completed
+  // When required parties have clicked Next, mark the shared stage completed
   useEffect(() => {
     if (!isSharedStep) return
     if (advancePending.length > 0) return
@@ -370,9 +349,48 @@ export default function ApplicationPage() {
     }
   }, [routeId])
 
+  const sharedSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const completedRef = useRef(completed)
+  completedRef.current = completed
+
+  async function persistSharedFlags(snapshot: Record<string, unknown>) {
+    const applicationId = asString(snapshot.applicationId) || routeId
+    if (!applicationId) return
+    try {
+      const saved = await patchApplication(applicationId, {
+        status: STAGE_STATUS[stageIdRef.current] ?? 'in_progress',
+        formData: snapshot,
+        completedStages: Array.from(completedRef.current),
+        apartmentId: asString(snapshot.apartmentId) || null,
+        applicantName: asString(snapshot.applicantName) || undefined,
+        applicantEmail: asString(snapshot.applicantEmail) || undefined,
+        applicantPhone: asString(snapshot.applicantPhone) || null,
+      })
+      const remoteForm = (saved.data.formData ?? {}) as Record<string, unknown>
+      setFormData((prev) =>
+        mergeSharedFlags({ ...prev, ...snapshot, applicationId }, remoteForm),
+      )
+      if (Array.isArray(saved.data.completedStages)) {
+        setCompleted(new Set(saved.data.completedStages as StageId[]))
+      }
+    } catch {
+      // Keep local checkbox state; next poll/save can retry.
+    }
+  }
+
   function updateField(key: string, value: unknown) {
     if (!editable) return
-    setFormData((prev) => ({ ...prev, [key]: value }))
+    setFormData((prev) => {
+      const next = { ...prev, [key]: value }
+      formDataRef.current = next
+      if (isSharedSyncKey(key)) {
+        if (sharedSaveTimer.current) window.clearTimeout(sharedSaveTimer.current)
+        sharedSaveTimer.current = window.setTimeout(() => {
+          void persistSharedFlags(formDataRef.current)
+        }, 200)
+      }
+      return next
+    })
   }
 
   async function ensureApplication(data: Record<string, unknown>) {
@@ -575,29 +593,10 @@ export default function ApplicationPage() {
         applicantPhone: asString(nextForm.applicantPhone) || null,
       })
       const remoteForm = (saved.data.formData ?? nextForm) as Record<string, unknown>
-      const mergedForm: Record<string, unknown> = {
-        ...nextForm,
-        ...remoteForm,
-        applicationId,
-      }
-      for (const key of [
-        'signApplicantDone',
-        'signLandlordDone',
-        'signAgentDone',
-        'inspectionTenantSigned',
-        'inspectionLandlordSigned',
-        'inspectionAgentSigned',
-        'leaseNextTenant',
-        'leaseNextLandlord',
-        'leaseNextAgent',
-        'moveinNextTenant',
-        'moveinNextLandlord',
-        'moveinNextAgent',
-      ] as const) {
-        if (nextForm[key] === true || remoteForm[key] === true || remoteForm[key] === 'true') {
-          mergedForm[key] = true
-        }
-      }
+      const mergedForm = mergeSharedFlags(
+        { ...nextForm, applicationId },
+        remoteForm,
+      )
       setFormData(mergedForm)
       if (Array.isArray(saved.data.completedStages)) {
         setCompleted(new Set(saved.data.completedStages as StageId[]))

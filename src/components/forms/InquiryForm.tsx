@@ -1272,8 +1272,8 @@ function PartySignStatusBoard({
     >
       <strong>
         {allDone
-          ? 'All parties have signed'
-          : 'Signature status — updates when each party saves'}
+          ? 'Required parties have signed'
+          : 'Signature status — syncs live when each party confirms'}
       </strong>
       <ul className="party-sign-list">
         {statuses.map((s) => (
