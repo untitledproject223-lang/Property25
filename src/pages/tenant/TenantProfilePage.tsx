@@ -9,6 +9,7 @@ import {
   uploadTenantAvatar,
   type DocumentMeta,
 } from '../../data/api'
+import '../../components/forms/forms.css'
 
 export default function TenantProfilePage() {
   const [profile, setProfile] = useState<Record<string, unknown> | null>(null)
@@ -124,28 +125,15 @@ export default function TenantProfilePage() {
       {message ? <p className="role-callout role-shared">{message}</p> : null}
 
       {profile ? (
-        <>
-          <section className="form-section" style={{ marginBottom: '1.25rem' }}>
-            <legend>Profile picture</legend>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <div
-                style={{
-                  width: 72,
-                  height: 72,
-                  borderRadius: '50%',
-                  overflow: 'hidden',
-                  background: '#d0d9e4',
-                  display: 'grid',
-                  placeItems: 'center',
-                  fontWeight: 700,
-                }}
-              >
+        <div className="profile-layout">
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Profile picture</h2>
+            </div>
+            <div className="panel-body profile-avatar-row">
+              <div className="profile-avatar" aria-hidden="true">
                 {avatarSrc ? (
-                  <img
-                    src={avatarSrc}
-                    alt=""
-                    style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
+                  <img src={avatarSrc} alt="" />
                 ) : (
                   String(profile.displayName ?? profile.name ?? '?')
                     .slice(0, 1)
@@ -164,52 +152,62 @@ export default function TenantProfilePage() {
             </div>
           </section>
 
-          <section className="form-section" style={{ marginBottom: '1.25rem' }}>
-            <legend>Personal details</legend>
-            <ProfileRow
-              label="Full name"
-              value={String(profile.displayName ?? profile.name ?? '')}
-              editing={editing === 'name'}
-              onEdit={() => setEditing('name')}
-              onCancel={() => setEditing(null)}
-              onSave={() => void saveField('name')}
-              saving={saving}
-            >
-              <input value={name} onChange={(e) => setName(e.target.value)} />
-            </ProfileRow>
-            <div className="field field-span">
-              <span className="field-label">Email</span>
-              <input className="input-filled-locked" value={String(profile.email)} readOnly />
-              <span className="field-hint">Email cannot be changed here.</span>
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Personal details</h2>
             </div>
-            <ProfileRow
-              label="Phone"
-              value={String(profile.phone ?? '—')}
-              editing={editing === 'phone'}
-              onEdit={() => setEditing('phone')}
-              onCancel={() => setEditing(null)}
-              onSave={() => void saveField('phone')}
-              saving={saving}
-            >
-              <input value={phone} onChange={(e) => setPhone(e.target.value)} />
-            </ProfileRow>
-            <ProfileRow
-              label="WhatsApp"
-              value={String(profile.whatsapp ?? '—')}
-              editing={editing === 'whatsapp'}
-              onEdit={() => setEditing('whatsapp')}
-              onCancel={() => setEditing(null)}
-              onSave={() => void saveField('whatsapp')}
-              saving={saving}
-            >
-              <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
-            </ProfileRow>
+            <div className="panel-body form-grid profile-form-grid">
+              <ProfileRow
+                label="Full name"
+                value={String(profile.displayName ?? profile.name ?? '')}
+                editing={editing === 'name'}
+                onEdit={() => setEditing('name')}
+                onCancel={() => setEditing(null)}
+                onSave={() => void saveField('name')}
+                saving={saving}
+              >
+                <input value={name} onChange={(e) => setName(e.target.value)} />
+              </ProfileRow>
+              <label className="field field-span">
+                <span className="field-label">Email</span>
+                <input
+                  className="input-filled-locked"
+                  value={String(profile.email)}
+                  readOnly
+                />
+                <span className="field-hint">Email cannot be changed here.</span>
+              </label>
+              <ProfileRow
+                label="Phone"
+                value={String(profile.phone ?? '—')}
+                editing={editing === 'phone'}
+                onEdit={() => setEditing('phone')}
+                onCancel={() => setEditing(null)}
+                onSave={() => void saveField('phone')}
+                saving={saving}
+              >
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} />
+              </ProfileRow>
+              <ProfileRow
+                label="WhatsApp"
+                value={String(profile.whatsapp ?? '—')}
+                editing={editing === 'whatsapp'}
+                onEdit={() => setEditing('whatsapp')}
+                onCancel={() => setEditing(null)}
+                onSave={() => void saveField('whatsapp')}
+                saving={saving}
+              >
+                <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} />
+              </ProfileRow>
+            </div>
           </section>
 
-          <section className="form-section" style={{ marginBottom: '1.25rem' }}>
-            <legend>Change password</legend>
-            <form className="form-grid" onSubmit={onPassword}>
-              <label className="field">
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Change password</h2>
+            </div>
+            <form className="panel-body form-grid profile-form-grid" onSubmit={onPassword}>
+              <label className="field field-span">
                 <span className="field-label">Current password</span>
                 <input
                   type="password"
@@ -218,7 +216,7 @@ export default function TenantProfilePage() {
                   required
                 />
               </label>
-              <label className="field">
+              <label className="field field-span">
                 <span className="field-label">New password</span>
                 <input
                   type="password"
@@ -228,56 +226,68 @@ export default function TenantProfilePage() {
                   required
                 />
               </label>
-              <button type="submit" className="btn btn-primary btn-compact" disabled={saving}>
-                Update password
-              </button>
+              <div className="field field-span">
+                <button type="submit" className="btn btn-primary btn-compact" disabled={saving}>
+                  Update password
+                </button>
+              </div>
             </form>
           </section>
 
-          <section className="form-section" style={{ marginBottom: '1.25rem' }}>
-            <legend>Lease agreement</legend>
-            {leaseDocs.length === 0 ? (
-              <p className="field-hint">No lease document is available yet.</p>
-            ) : (
-              <ul className="file-selected-list">
-                {leaseDocs.map((doc) => (
-                  <li key={doc.id}>
-                    {doc.filename}{' '}
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-compact"
-                      onClick={() => void downloadDocument(doc.id)}
-                    >
-                      Download lease
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Lease agreement</h2>
+            </div>
+            <div className="panel-body">
+              {leaseDocs.length === 0 ? (
+                <p className="muted">No lease document is available yet.</p>
+              ) : (
+                <ul className="profile-doc-list">
+                  {leaseDocs.map((doc) => (
+                    <li key={doc.id}>
+                      <span>{doc.filename}</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={() => void downloadDocument(doc.id)}
+                      >
+                        Download lease
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
 
-          <section className="form-section">
-            <legend>Application documents</legend>
-            {docs.length === 0 ? (
-              <p className="field-hint">No documents uploaded yet.</p>
-            ) : (
-              <ul className="file-selected-list">
-                {docs.map((doc) => (
-                  <li key={doc.id}>
-                    {doc.docType} — {doc.filename}{' '}
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-compact"
-                      onClick={() => void downloadDocument(doc.id)}
-                    >
-                      Download
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+          <section className="panel">
+            <div className="panel-header">
+              <h2>Application documents</h2>
+            </div>
+            <div className="panel-body">
+              {docs.length === 0 ? (
+                <p className="muted">No documents uploaded yet.</p>
+              ) : (
+                <ul className="profile-doc-list">
+                  {docs.map((doc) => (
+                    <li key={doc.id}>
+                      <span>
+                        {doc.docType} — {doc.filename}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={() => void downloadDocument(doc.id)}
+                      >
+                        Download
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </section>
-        </>
+        </div>
       ) : null}
     </div>
   )
@@ -308,8 +318,13 @@ function ProfileRow({
       {editing ? (
         <>
           {children}
-          <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.4rem' }}>
-            <button type="button" className="btn btn-primary btn-compact" disabled={saving} onClick={onSave}>
+          <div className="profile-row-actions">
+            <button
+              type="button"
+              className="btn btn-primary btn-compact"
+              disabled={saving}
+              onClick={onSave}
+            >
               Save
             </button>
             <button type="button" className="btn btn-ghost btn-compact" onClick={onCancel}>
@@ -318,7 +333,7 @@ function ProfileRow({
           </div>
         </>
       ) : (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+        <div className="profile-row-static">
           <input className="input-filled-locked" value={value} readOnly />
           <button type="button" className="btn btn-ghost btn-compact" onClick={onEdit}>
             Edit

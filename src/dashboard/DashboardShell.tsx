@@ -43,6 +43,11 @@ export function DashboardShell() {
             </NavLink>
           ))}
         </nav>
+        <div className="dash-sidebar-footer">
+          <button type="button" className="dash-signout" onClick={logout}>
+            Sign out
+          </button>
+        </div>
       </aside>
 
       <div className="dash-main">
@@ -58,14 +63,9 @@ export function DashboardShell() {
               </p>
             ) : null}
           </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <p className="dash-topbar-agent">
-              {user?.name ?? 'Agent'} · {user?.role}
-            </p>
-            <button type="button" className="btn btn-ghost btn-compact" onClick={logout}>
-              Sign out
-            </button>
-          </div>
+          <p className="dash-topbar-agent">
+            {user?.name ?? 'Agent'} · {user?.role}
+          </p>
         </header>
         <div className="dash-content">
           <Outlet />

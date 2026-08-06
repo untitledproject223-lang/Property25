@@ -61,9 +61,6 @@ export default function TenantHomePage() {
           <h1>Welcome, {user?.name}</h1>
           <p>Your current stay and quick actions.</p>
         </div>
-        <Link to="/tenant/issues" className="btn btn-primary">
-          Create a ticket
-        </Link>
       </header>
 
       {error ? <p className="login-error">{error}</p> : null}
@@ -131,8 +128,8 @@ export default function TenantHomePage() {
             <Link to="/tenant/invoices" className="btn btn-ghost btn-compact">
               View invoices
             </Link>
-            <Link to="/tenant/issues" className="btn btn-primary btn-compact">
-              Create a ticket
+            <Link to="/tenant/issues" className="btn btn-ghost btn-compact">
+              View tickets
             </Link>
           </div>
         </section>

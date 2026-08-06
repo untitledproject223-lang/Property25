@@ -37,6 +37,11 @@ export function PortalShell({
             </NavLink>
           ))}
         </nav>
+        <div className="dash-sidebar-footer">
+          <button type="button" className="dash-signout" onClick={logout}>
+            Sign out
+          </button>
+        </div>
       </aside>
 
       <div className="dash-main">
@@ -44,14 +49,9 @@ export function PortalShell({
           <div>
             <p className="dash-topbar-label">{user?.org.name ?? 'Property25'}</p>
           </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-            <p className="dash-topbar-agent">
-              {user?.name ?? 'User'} · {user?.role}
-            </p>
-            <button type="button" className="btn btn-ghost btn-compact" onClick={logout}>
-              Sign out
-            </button>
-          </div>
+          <p className="dash-topbar-agent">
+            {user?.name ?? 'User'} · {user?.role}
+          </p>
         </header>
         <div className="dash-content">
           <Outlet />
@@ -66,10 +66,10 @@ export function TenantShell() {
     <PortalShell
       title="Tenant Portal"
       nav={[
-        { to: '/tenant', label: 'Home', end: true },
-        { to: '/tenant/stays', label: 'Stays' },
+        { to: '/tenant', label: 'Dashboard', end: true },
         { to: '/tenant/invoices', label: 'Invoices' },
         { to: '/tenant/issues', label: 'Tickets' },
+        { to: '/tenant/stays', label: 'Stays' },
         { to: '/tenant/profile', label: 'Profile' },
         { to: '/tenant/applications', label: 'Applications' },
       ]}
