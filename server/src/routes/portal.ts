@@ -25,6 +25,7 @@ portalRouter.get('/tenant/stays', requireTenant, async (req, res, next) => {
         a.unit_number AS "unitNumber",
         a.rent::float8 AS rent,
         a.deposit::float8 AS deposit,
+        COALESCE(a.deposit_balance, a.deposit)::float8 AS "depositBalance",
         a.ticket_manager AS "ticketManager",
         b.name AS "buildingName",
         b.address AS "buildingAddress",
@@ -68,6 +69,7 @@ portalRouter.get('/tenant/stays/:id', requireTenant, async (req, res, next) => {
         a.unit_number AS "unitNumber",
         a.rent::float8 AS rent,
         a.deposit::float8 AS deposit,
+        COALESCE(a.deposit_balance, a.deposit)::float8 AS "depositBalance",
         a.ticket_manager AS "ticketManager",
         b.name AS "buildingName",
         b.address AS "buildingAddress",
@@ -301,6 +303,7 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         a.unit_number AS "unitNumber",
         a.rent::float8 AS rent,
         a.deposit::float8 AS deposit,
+        COALESCE(a.deposit_balance, a.deposit)::float8 AS "depositBalance",
         a.status,
         a.ticket_manager AS "ticketManager",
         b.name AS "buildingName",
@@ -360,6 +363,25 @@ portalRouter.patch(
         RETURNING a.id, a.ticket_manager AS "ticketManager", a.unit_number AS "unitNumber"
       `
       if (rows.length === 0) throw new AppError(404, 'Unit not found')
+
+      // Sync open undecided tickets so the new manager can approve costs immediately
+      await sql`
+        UPDATE issues i
+        SET
+          management_owner = ${body.ticketManager},
+          updated_at = now()
+        FROM tenants t
+        WHERE t.id = i.tenant_id
+          AND t.apartment_id = ${id}
+          AND i.org_id = ${req.orgId!}
+          AND i.status IN ('open', 'pending')
+          AND (
+            i.decision_json IS NULL
+            OR i.decision_json = '{}'::jsonb
+            OR NOT (i.decision_json ? 'outcome')
+          )
+      `
+
       res.json({ data: rows[0] })
     } catch (err) {
       next(err)
@@ -426,11 +448,11 @@ portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => 
 
     const rows = await sql`
       INSERT INTO apartments (
-        org_id, building_id, landlord_id, unit_number, rent, deposit, status
+        org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status
       )
       VALUES (
         ${req.orgId!}, ${buildingId}, ${landlordId}, ${body.unitNumber.trim()},
-        ${body.rent}, ${body.deposit}, 'vacant'
+        ${body.rent}, ${body.deposit}, ${body.deposit}, 'vacant'
       )
       RETURNING id, unit_number AS "unitNumber", rent::float8 AS rent,
         deposit::float8 AS deposit, status, building_id AS "buildingId",

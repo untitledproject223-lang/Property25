@@ -93,7 +93,20 @@ export default function TenantHomePage() {
             </div>
             <div>
               <dt>Deposit</dt>
-              <dd>{formatMoney(Number(current.deposit) || 0)}</dd>
+              <dd>
+                {formatMoney(Number(current.deposit) || 0)}
+                <span style={{ color: 'var(--ink-muted)', fontWeight: 500 }}>
+                  {' '}
+                  · Balance{' '}
+                  {formatMoney(
+                    Number(
+                      current.depositBalance != null
+                        ? current.depositBalance
+                        : current.deposit,
+                    ) || 0,
+                  )}
+                </span>
+              </dd>
             </div>
             <div>
               <dt>Status</dt>

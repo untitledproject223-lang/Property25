@@ -52,13 +52,13 @@ apartmentsRouter.post('/', async (req, res, next) => {
 
     const rows = await sql`
       INSERT INTO apartments (
-        org_id, building_id, landlord_id, unit_number, rent, deposit, status, next_due_date
+        org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status, next_due_date
       )
       VALUES (
         ${req.orgId!}, ${body.buildingId}, ${body.landlordId}, ${body.unitNumber},
-        ${body.rent}, ${body.deposit}, ${body.status}, ${body.nextDueDate ?? null}
+        ${body.rent}, ${body.deposit}, ${body.deposit}, ${body.status}, ${body.nextDueDate ?? null}
       )
-      RETURNING id, org_id, building_id, landlord_id, unit_number, rent, deposit, status, next_due_date, created_at, updated_at
+      RETURNING id, org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status, next_due_date, created_at, updated_at
     `
     res.status(201).json({ data: rows[0] })
   } catch (err) {
@@ -277,6 +277,16 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
 
     const buildingId = body.buildingId ?? existing[0].building_id
     const landlordId = body.landlordId ?? existing[0].landlord_id
+    const nextDeposit = body.deposit ?? existing[0].deposit
+    const oldDeposit = Number(existing[0].deposit)
+    const oldBalance = Number(
+      existing[0].deposit_balance ?? existing[0].deposit ?? 0,
+    )
+    // If deposit held never had deductions, keep balance aligned with deposit
+    const nextBalance =
+      body.deposit !== undefined && oldBalance === oldDeposit
+        ? Number(nextDeposit)
+        : oldBalance
 
     const rows = await sql`
       UPDATE apartments
@@ -285,7 +295,8 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
         landlord_id = ${landlordId},
         unit_number = ${body.unitNumber ?? existing[0].unit_number},
         rent = ${body.rent ?? existing[0].rent},
-        deposit = ${body.deposit ?? existing[0].deposit},
+        deposit = ${nextDeposit},
+        deposit_balance = ${nextBalance},
         status = ${body.status ?? existing[0].status},
         next_due_date = ${
           body.nextDueDate !== undefined ? body.nextDueDate : existing[0].next_due_date
@@ -294,6 +305,7 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
       WHERE id = ${id} AND org_id = ${req.orgId!}
       RETURNING id, building_id AS "buildingId", landlord_id AS "landlordId",
         unit_number AS "unitNumber", rent::float8 AS rent, deposit::float8 AS deposit,
+        deposit_balance::float8 AS "depositBalance",
         status, next_due_date AS "nextDueDate"
     `
     res.json({ data: rows[0] })

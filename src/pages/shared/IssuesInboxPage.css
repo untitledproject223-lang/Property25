@@ -59,10 +59,34 @@
   color: var(--ink);
 }
 
+.ticket-list-tenant {
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+}
+
 .ticket-list-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 0.35rem;
+}
+
+.ticket-cost-record {
+  margin-top: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f7f9fc;
+  display: grid;
+  gap: 0.25rem;
+  font-size: 0.86rem;
+  color: var(--ink);
+}
+
+.ticket-cost-record strong {
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
 }
 
 .ticket-thread-panel {

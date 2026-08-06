@@ -71,10 +71,10 @@ async function seed() {
   `
 
   await sql`
-    INSERT INTO apartments (org_id, building_id, landlord_id, unit_number, rent, deposit, status, next_due_date)
+    INSERT INTO apartments (org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status, next_due_date)
     VALUES
-      (${org.id}, ${building.id}, ${landlord.id}, '4B', 14500, 29000, 'vacant', NULL),
-      (${org.id}, ${building.id}, ${landlord.id}, '7C', 16000, 32000, 'vacant', NULL)
+      (${org.id}, ${building.id}, ${landlord.id}, '4B', 14500, 29000, 29000, 'vacant', NULL),
+      (${org.id}, ${building.id}, ${landlord.id}, '7C', 16000, 32000, 32000, 'vacant', NULL)
   `
 
   console.log('Seed complete.')

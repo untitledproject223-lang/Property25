@@ -7,7 +7,13 @@ import { formatDate, formatMoney } from '../../data/utils'
 import { generateInvoicePdf } from '../../utils/invoicePdf'
 import './InvoiceViewPage.css'
 
-export default function InvoiceViewPage({ backTo }: { backTo: string }) {
+export default function InvoiceViewPage({
+  backTo,
+  backLabel = 'Back to invoices',
+}: {
+  backTo: string
+  backLabel?: string
+}) {
   const { id } = useParams()
   const navigate = useNavigate()
   const [error, setError] = useState<string | null>(null)
@@ -134,7 +140,7 @@ export default function InvoiceViewPage({ backTo }: { backTo: string }) {
           className="btn btn-ghost btn-compact"
           onClick={() => navigate(backTo)}
         >
-          ← Back to invoices
+          ← {backLabel}
         </button>
         <div className="invoice-view-toolbar-actions">
           <button

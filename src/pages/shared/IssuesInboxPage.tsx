@@ -6,6 +6,7 @@ import {
   tenantMaintenanceAmount,
   ticketInvoiceDescription,
 } from '../../data/invoiceHelpers'
+import { formatDateTimeShort, formatMoney } from '../../data/utils'
 import './IssuesInboxPage.css'
 
 type IssueRow = Record<string, unknown>
@@ -50,9 +51,13 @@ export default function IssuesInboxPage({
   const [issueType, setIssueType] = useState<'maintenance' | 'general' | 'invoice'>(
     'general',
   )
+  const [preferredPayment, setPreferredPayment] = useState<'invoice' | 'deposit'>(
+    'invoice',
+  )
   const [closing, setClosing] = useState(false)
   const [deciding, setDeciding] = useState(false)
   const [invoicing, setInvoicing] = useState(false)
+  const [paying, setPaying] = useState(false)
   const [invoiceNotice, setInvoiceNotice] = useState<string | null>(null)
 
   const [decisionOutcome, setDecisionOutcome] = useState<'accept' | 'reject' | 'conditional'>(
@@ -66,14 +71,25 @@ export default function IssuesInboxPage({
   const [tenantShare, setTenantShare] = useState('50')
   const [decisionNote, setDecisionNote] = useState('')
 
-  const refresh = useCallback(() => {
-    listIssues()
-      .then((r) => setIssues(r.data))
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to load'))
+  const refresh = useCallback(async (silent = false) => {
+    try {
+      const r = await listIssues()
+      setIssues(r.data)
+      if (!silent) setError(null)
+    } catch (e) {
+      if (!silent) setError(e instanceof Error ? e.message : 'Failed to load')
+    }
   }, [])
 
   useEffect(() => {
-    refresh()
+    void refresh()
+    const poll = window.setInterval(() => void refresh(true), 3000)
+    const onFocus = () => void refresh(true)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.clearInterval(poll)
+      window.removeEventListener('focus', onFocus)
+    }
   }, [refresh])
 
   const selected = issues.find((i) => String(i.id) === selectedId) ?? null
@@ -83,7 +99,9 @@ export default function IssuesInboxPage({
   const status = String(selected?.status ?? '')
   const isClosed = status === 'resolved' || status === 'rejected'
   const decision = (selected?.decision ?? {}) as Record<string, unknown>
-  const managementOwner = String(selected?.managementOwner ?? 'landlord')
+  const managementOwner = String(
+    selected?.ticketManager ?? selected?.managementOwner ?? 'landlord',
+  )
   const isMaintenance = String(selected?.issueType) === 'maintenance'
   const isAccepted =
     decision.outcome === 'accept' || decision.outcome === 'conditional'
@@ -97,13 +115,28 @@ export default function IssuesInboxPage({
       (managementOwner === 'agent' && user?.role === 'agent'))
   const chatOpen = isAccepted && !isClosed
   const closureResult = String(decision.closureResult ?? '')
+  const tenantCanClose = allowClose && user?.role === 'tenant' && chatOpen
+  const paymentMethod = String(decision.tenantPaymentMethod ?? '')
+  const billable = isTenantBillableTicket({
+    issueType: selected?.issueType,
+    decision,
+  })
   const canCreateTicketInvoice =
     Boolean(selected) &&
     (user?.role === 'landlord' || user?.role === 'agent' || user?.role === 'admin') &&
-    isTenantBillableTicket({
-      issueType: selected?.issueType,
-      decision,
-    })
+    billable &&
+    paymentMethod !== 'deposit'
+  const tenantNeedsPaymentChoice =
+    user?.role === 'tenant' &&
+    Boolean(selected) &&
+    billable &&
+    !isClosed &&
+    !paymentMethod
+  const hasCostRecord =
+    decision.materialsCost != null ||
+    decision.labourCost != null ||
+    decision.totalCost != null ||
+    Boolean(decision.workDescription)
 
   async function onCreateTicketInvoice() {
     if (!selected || !canCreateTicketInvoice) return
@@ -142,6 +175,20 @@ export default function IssuesInboxPage({
     }
   }
 
+  async function onTenantPayment(method: 'invoice' | 'deposit') {
+    if (!selectedId || !tenantNeedsPaymentChoice) return
+    setPaying(true)
+    setError(null)
+    try {
+      await patchIssue(selectedId, { tenantPayment: { method } })
+      await refresh()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save payment choice')
+    } finally {
+      setPaying(false)
+    }
+  }
+
   async function onCreate(e: FormEvent) {
     e.preventDefault()
     setError(null)
@@ -150,12 +197,15 @@ export default function IssuesInboxPage({
         subject: subject.trim(),
         issueType,
         message: message.trim() || undefined,
+        preferredPayment:
+          issueType === 'maintenance' ? preferredPayment : undefined,
       })
       setCreating(false)
       setSubject('')
       setMessage('')
       setIssueType('general')
-      refresh()
+      setPreferredPayment('invoice')
+      await refresh()
       setSelectedId(String(created.data.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create ticket')
@@ -173,19 +223,19 @@ export default function IssuesInboxPage({
         },
       })
       setReply('')
-      refresh()
+      await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Reply failed')
     }
   }
 
   async function onClose(result: 'successful' | 'unsuccessful') {
-    if (!selectedId || !chatOpen) return
+    if (!selectedId || !tenantCanClose) return
     setClosing(true)
     setError(null)
     try {
       await patchIssue(selectedId, { close: { result } })
-      refresh()
+      await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not close ticket')
     } finally {
@@ -231,7 +281,7 @@ export default function IssuesInboxPage({
       setLabourCost('')
       setDecisionNote('')
       setDecisionOutcome('accept')
-      refresh()
+      await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Decision failed')
     } finally {
@@ -245,8 +295,7 @@ export default function IssuesInboxPage({
         <div>
           <h1>{title}</h1>
           <p>
-            Tickets are reviewed by the landlord or managing agent first. Correspondence opens
-            only after acceptance.
+            Tickets update automatically. Only the tenant can close a ticket once work is done.
           </p>
         </div>
         {allowCreate ? (
@@ -289,6 +338,22 @@ export default function IssuesInboxPage({
                 required
               />
             </label>
+            {issueType === 'maintenance' ? (
+              <label className="field field-span">
+                <span className="field-label">
+                  If you are charged for this work, how should it be paid?
+                </span>
+                <select
+                  value={preferredPayment}
+                  onChange={(e) =>
+                    setPreferredPayment(e.target.value as 'invoice' | 'deposit')
+                  }
+                >
+                  <option value="invoice">Invoice me</option>
+                  <option value="deposit">Deduct from my deposit</option>
+                </select>
+              </label>
+            ) : null}
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="submit" className="btn btn-primary">
                 Submit
@@ -311,7 +376,8 @@ export default function IssuesInboxPage({
           <ul className="ticket-list">
             {issues.map((issue) => {
               const d = (issue.decision ?? {}) as Record<string, unknown>
-              const awaiting = !d.outcome && issue.status !== 'resolved' && issue.status !== 'rejected'
+              const awaiting =
+                !d.outcome && issue.status !== 'resolved' && issue.status !== 'rejected'
               return (
                 <li key={String(issue.id)}>
                   <button
@@ -320,6 +386,9 @@ export default function IssuesInboxPage({
                     onClick={() => setSelectedId(String(issue.id))}
                   >
                     <strong>{String(issue.subject)}</strong>
+                    {issue.tenantName ? (
+                      <span className="ticket-list-tenant">{String(issue.tenantName)}</span>
+                    ) : null}
                     <div className="ticket-list-meta">
                       <span className="badge-status">{String(issue.issueType)}</span>
                       <span className={`badge-status ${String(issue.status)}`}>
@@ -340,10 +409,9 @@ export default function IssuesInboxPage({
               <header className="ticket-thread-header">
                 <h2>{String(selected.subject)}</h2>
                 <p className="ticket-thread-sub">
+                  {selected.tenantName ? `${String(selected.tenantName)} · ` : ''}
                   {String(selected.issueType)} ·{' '}
-                  {awaitingDecision
-                    ? 'Awaiting review'
-                    : statusLabel(status)}
+                  {awaitingDecision ? 'Awaiting review' : statusLabel(status)}
                   {` · Managed by ${managerLabel(managementOwner)}`}
                 </p>
 
@@ -375,7 +443,34 @@ export default function IssuesInboxPage({
                       {decision.totalCost != null
                         ? ` Total estimated: R${String(decision.totalCost)}.`
                         : ''}
+                      {paymentMethod === 'deposit'
+                        ? ` Paid from deposit (R${String(decision.depositDeductedAmount ?? '')}).`
+                        : paymentMethod === 'invoice'
+                          ? ' Tenant chose to be invoiced.'
+                          : ''}
                     </span>
+                  </div>
+                ) : null}
+
+                {hasCostRecord ? (
+                  <div className="ticket-cost-record" role="region" aria-label="Maintenance costs">
+                    <strong>Maintenance cost record</strong>
+                    {decision.workDescription ? (
+                      <span>Work: {String(decision.workDescription)}</span>
+                    ) : null}
+                    <span>
+                      Materials {formatMoney(Number(decision.materialsCost) || 0)} · Labour{' '}
+                      {formatMoney(Number(decision.labourCost) || 0)} · Total{' '}
+                      {formatMoney(Number(decision.totalCost) || 0)}
+                    </span>
+                    {decision.depositDeductedAmount != null ? (
+                      <span>
+                        Deposit deduction {formatMoney(Number(decision.depositDeductedAmount))}
+                        {decision.depositBalanceAfter != null
+                          ? ` · Balance after ${formatMoney(Number(decision.depositBalanceAfter))}`
+                          : ''}
+                      </span>
+                    ) : null}
                   </div>
                 ) : null}
 
@@ -388,10 +483,39 @@ export default function IssuesInboxPage({
                   </p>
                 ) : null}
 
+                {tenantNeedsPaymentChoice ? (
+                  <div className="ticket-close-bar">
+                    <p>
+                      You are responsible for{' '}
+                      {formatMoney(tenantMaintenanceAmount(decision))} on this
+                      maintenance ticket. Choose how to pay:
+                    </p>
+                    <div className="ticket-close-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-compact"
+                        disabled={paying}
+                        onClick={() => void onTenantPayment('invoice')}
+                      >
+                        Invoice me
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        disabled={paying}
+                        onClick={() => void onTenantPayment('deposit')}
+                      >
+                        Take from deposit
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
                 {canCreateTicketInvoice ? (
                   <div className="ticket-close-bar">
                     <p>
-                      Tenant is responsible for maintenance payment on this ticket. Create an
+                      Tenant is responsible for maintenance payment on this ticket
+                      {paymentMethod === 'invoice' ? ' and chose to be invoiced' : ''}. Create an
                       invoice to bill them.
                     </p>
                     <div className="ticket-close-actions">
@@ -414,7 +538,7 @@ export default function IssuesInboxPage({
                   const author = String(m.author)
                   const mine = author === myAuthor
                   const isSystem =
-                    /ticket closed|ticket accepted|ticket rejected|ticket approved|correspondence is now open|maintenance accepted|maintenance approved|maintenance request rejected|no work will be carried/i.test(
+                    /ticket closed|ticket accepted|ticket rejected|ticket approved|correspondence is now open|maintenance accepted|maintenance approved|maintenance request rejected|no work will be carried|chose to|deduct/i.test(
                       String(m.body),
                     )
                   return (
@@ -424,7 +548,7 @@ export default function IssuesInboxPage({
                     >
                       <div className="ticket-bubble-meta">
                         <span>{authorLabel(author)}</span>
-                        <span>{new Date(String(m.at)).toLocaleString()}</span>
+                        <span>{formatDateTimeShort(String(m.at))}</span>
                       </div>
                       <p className="ticket-bubble-body">{String(m.body)}</p>
                     </article>
@@ -591,10 +715,11 @@ export default function IssuesInboxPage({
                   </p>
                 ) : null}
 
-                {allowClose && chatOpen ? (
+                {tenantCanClose ? (
                   <div className="ticket-close-bar">
                     <p>
-                      When the matter is finished, close the ticket and record the outcome.
+                      When you are satisfied with the resolution, close the ticket and record the
+                      outcome.
                     </p>
                     <div className="ticket-close-actions">
                       <button
@@ -615,6 +740,10 @@ export default function IssuesInboxPage({
                       </button>
                     </div>
                   </div>
+                ) : chatOpen && user?.role !== 'tenant' ? (
+                  <p className="muted" style={{ marginTop: '0.75rem' }}>
+                    Only the tenant can close this ticket once they are satisfied.
+                  </p>
                 ) : null}
               </div>
             </>

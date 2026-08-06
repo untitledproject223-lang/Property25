@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react'
 import { setUnitTicketManager, fetchLandlordPortfolio } from '../../data/api'
-import { formatMoney } from '../../data/utils'
+import { formatDate, formatMoney, nextMonthEndDate } from '../../data/utils'
 
 export default function LandlordPortfolioPage() {
   const [units, setUnits] = useState<Array<Record<string, unknown>>>([])
   const [landlord, setLandlord] = useState<Record<string, unknown> | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [savingId, setSavingId] = useState<string | null>(null)
+  const monthEndDue = nextMonthEndDate()
 
   async function load() {
     try {
@@ -65,6 +66,8 @@ export default function LandlordPortfolioPage() {
                 <th>Unit</th>
                 <th>Lease</th>
                 <th>Rent</th>
+                <th>Next due</th>
+                <th>Deposit balance</th>
                 <th>Open tickets</th>
                 <th>Ticket management</th>
               </tr>
@@ -91,6 +94,14 @@ export default function LandlordPortfolioPage() {
                     {String(u.leaseStart ?? '—')} → {String(u.leaseEnd ?? '—')}
                   </td>
                   <td>{formatMoney(Number(u.rent) || 0)}</td>
+                  <td>{formatDate(monthEndDue)}</td>
+                  <td>
+                    {formatMoney(
+                      Number(
+                        u.depositBalance != null ? u.depositBalance : u.deposit,
+                      ) || 0,
+                    )}
+                  </td>
                   <td>{String(u.openIssues ?? 0)}</td>
                   <td>
                     <select

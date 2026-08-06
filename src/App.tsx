@@ -94,7 +94,7 @@ export default function App() {
             <Route element={<AgentOnly />}>
               <Route
                 path="invoices/:id/view"
-                element={<InvoiceViewPage backTo="/invoices" />}
+                element={<InvoiceViewPage backTo="/" backLabel="Back to dashboard" />}
               />
               <Route element={<DashboardShell />}>
                 <Route index element={<PortfolioPage />} />
@@ -112,6 +112,7 @@ export default function App() {
                       title="Tickets"
                       allowCreate={false}
                       allowDecision
+                      allowClose={false}
                     />
                   }
                 />
@@ -147,7 +148,9 @@ export default function App() {
             <Route element={<LandlordOnly />}>
               <Route
                 path="landlord/invoices/:id/view"
-                element={<InvoiceViewPage backTo="/landlord/invoices" />}
+                element={
+                  <InvoiceViewPage backTo="/landlord" backLabel="Back to dashboard" />
+                }
               />
               <Route path="landlord" element={<LandlordShell />}>
                 <Route index element={<LandlordPortfolioPage />} />
@@ -161,6 +164,7 @@ export default function App() {
                       title="Tickets"
                       allowCreate={false}
                       allowDecision
+                      allowClose={false}
                     />
                   }
                 />

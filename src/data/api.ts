@@ -238,6 +238,7 @@ export async function createIssue(input: {
   audience?: string
   issueType?: 'maintenance' | 'general' | 'invoice'
   message?: string
+  preferredPayment?: 'invoice' | 'deposit'
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/issues', {
     method: 'POST',
@@ -263,6 +264,9 @@ export async function patchIssue(
     close?: {
       result: 'successful' | 'unsuccessful'
       note?: string
+    }
+    tenantPayment?: {
+      method: 'invoice' | 'deposit'
     }
   },
 ) {

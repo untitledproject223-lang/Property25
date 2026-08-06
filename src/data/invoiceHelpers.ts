@@ -10,6 +10,7 @@ export function isTenantBillableTicket(issue: {
     issue.decision && typeof issue.decision === 'object'
       ? (issue.decision as Record<string, unknown>)
       : {}
+  if (String(decision.tenantPaymentMethod ?? '') === 'deposit') return false
   const payer = String(decision.payer ?? '')
   return (
     decision.outcome === 'conditional' && (payer === 'tenant' || payer === 'split')

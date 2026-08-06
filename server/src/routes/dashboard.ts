@@ -16,7 +16,9 @@ dashboardRouter.get('/', async (req, res, next) => {
         sql`SELECT id, name, email, phone, whatsapp FROM landlords WHERE org_id = ${orgId} ORDER BY name`,
         sql`
           SELECT id, building_id AS "buildingId", unit_number AS "unitNumber",
-            rent::float8 AS rent, deposit::float8 AS deposit, status,
+            rent::float8 AS rent, deposit::float8 AS deposit,
+            COALESCE(deposit_balance, deposit)::float8 AS "depositBalance",
+            status,
             next_due_date AS "nextDueDate", landlord_id AS "landlordId",
             ticket_manager AS "ticketManager"
           FROM apartments WHERE org_id = ${orgId}

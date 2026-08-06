@@ -60,14 +60,19 @@ function mapIssue(row: Record<string, unknown>) {
     audience: row.audience,
     issueType: row.issue_type ?? row.issueType,
     managementOwner: row.management_owner ?? row.managementOwner,
+    /** Live unit manager — used for decision permissions after handoff. */
+    ticketManager: row.ticket_manager ?? row.ticketManager,
     decision: row.decision_json ?? row.decision ?? {},
     createdAt: row.created_at ?? row.createdAt,
     messages: row.messages_json ?? row.messages ?? [],
   }
 }
 
-function managementOwnerOf(row: Record<string, unknown>) {
-  return String(row.management_owner ?? row.managementOwner ?? 'landlord')
+/** Prefer live apartment ticket_manager over the snapshot frozen at create. */
+function decidingManagerOf(row: Record<string, unknown>) {
+  return String(
+    row.ticket_manager ?? row.ticketManager ?? row.management_owner ?? row.managementOwner ?? 'landlord',
+  )
 }
 
 function canDecideTicket(auth: AuthTokenPayload, managementOwner: string) {
@@ -82,6 +87,72 @@ function isTicketAccepted(decision: Record<string, unknown>) {
   return outcome === 'accept' || outcome === 'conditional'
 }
 
+function tenantBillableAmount(decision: Record<string, unknown>) {
+  const total = Number(decision.totalCost ?? 0)
+  const payer = String(decision.payer ?? '')
+  if (payer === 'split') {
+    const share = Number(decision.tenantShare ?? 0)
+    return Math.round(total * (share / 100) * 100) / 100
+  }
+  return total
+}
+
+function isTenantBillableDecision(issueType: string, decision: Record<string, unknown>) {
+  if (issueType !== 'maintenance') return false
+  const payer = String(decision.payer ?? '')
+  return (
+    decision.outcome === 'conditional' && (payer === 'tenant' || payer === 'split')
+  )
+}
+
+async function applyDepositDeduction(opts: {
+  orgId: string
+  tenantId: string
+  amount: number
+  decision: Record<string, unknown>
+  messages: Array<Record<string, unknown>>
+}) {
+  const amount = opts.amount
+  if (!(amount > 0)) {
+    throw new AppError(400, 'No maintenance amount to deduct from the deposit')
+  }
+  if (opts.decision.tenantPaymentMethod === 'deposit' && opts.decision.depositDeductedAt) {
+    throw new AppError(400, 'Deposit has already been deducted for this ticket')
+  }
+
+  const apt = await sql`
+    SELECT a.id, a.deposit_balance::float8 AS deposit_balance
+    FROM apartments a
+    JOIN tenants t ON t.apartment_id = a.id
+    WHERE t.id = ${opts.tenantId} AND t.org_id = ${opts.orgId}
+    LIMIT 1
+  `
+  if (apt.length === 0) throw new AppError(400, 'Apartment not found for this tenant')
+  const balance = Number(apt[0].deposit_balance ?? 0)
+  if (amount > balance) {
+    throw new AppError(
+      400,
+      `Insufficient deposit balance (R${balance}) for this maintenance charge (R${amount})`,
+    )
+  }
+  const next = Math.round((balance - amount) * 100) / 100
+  await sql`
+    UPDATE apartments
+    SET deposit_balance = ${next}, updated_at = now()
+    WHERE id = ${apt[0].id} AND org_id = ${opts.orgId}
+  `
+  opts.decision.tenantPaymentMethod = 'deposit'
+  opts.decision.depositDeductedAt = new Date().toISOString()
+  opts.decision.depositDeductedAmount = amount
+  opts.decision.depositBalanceAfter = next
+  opts.messages.push({
+    id: crypto.randomUUID(),
+    author: 'tenant',
+    body: `Tenant chose to deduct maintenance (R${amount}) from the security deposit. Remaining deposit balance: R${next}.`,
+    at: new Date().toISOString(),
+  })
+}
+
 issuesRouter.get('/', async (req, res, next) => {
   try {
     const auth = req.auth!
@@ -91,9 +162,10 @@ issuesRouter.get('/', async (req, res, next) => {
       rows = await sql`
         SELECT i.id, i.tenant_id, i.subject, i.status, i.severity, i.audience,
           i.issue_type, i.management_owner, i.decision_json, i.created_at, i.messages_json,
-          t.name AS tenant_name
+          t.name AS tenant_name, a.ticket_manager
         FROM issues i
         JOIN tenants t ON t.id = i.tenant_id
+        JOIN apartments a ON a.id = t.apartment_id
         WHERE i.org_id = ${auth.orgId}
         ORDER BY i.created_at DESC
       `
@@ -101,9 +173,10 @@ issuesRouter.get('/', async (req, res, next) => {
       rows = await sql`
         SELECT i.id, i.tenant_id, i.subject, i.status, i.severity, i.audience,
           i.issue_type, i.management_owner, i.decision_json, i.created_at, i.messages_json,
-          t.name AS tenant_name
+          t.name AS tenant_name, a.ticket_manager
         FROM issues i
         JOIN tenants t ON t.id = i.tenant_id
+        JOIN apartments a ON a.id = t.apartment_id
         WHERE i.org_id = ${auth.orgId} AND t.user_id = ${auth.sub}
         ORDER BY i.created_at DESC
       `
@@ -111,7 +184,7 @@ issuesRouter.get('/', async (req, res, next) => {
       rows = await sql`
         SELECT i.id, i.tenant_id, i.subject, i.status, i.severity, i.audience,
           i.issue_type, i.management_owner, i.decision_json, i.created_at, i.messages_json,
-          t.name AS tenant_name
+          t.name AS tenant_name, a.ticket_manager
         FROM issues i
         JOIN tenants t ON t.id = i.tenant_id
         JOIN apartments a ON a.id = t.apartment_id
@@ -139,6 +212,8 @@ const createSchema = z.object({
   audience: z.enum(['agent', 'landlord', 'both']).optional(),
   issueType: z.enum(['maintenance', 'general', 'invoice']).default('general'),
   message: z.string().min(1).max(4000).optional(),
+  /** Preference if this maintenance ticket is later charged to the tenant. */
+  preferredPayment: z.enum(['invoice', 'deposit']).optional(),
 })
 
 issuesRouter.post('/', async (req, res, next) => {
@@ -177,14 +252,20 @@ issuesRouter.post('/', async (req, res, next) => {
           ]
         : []
 
+      const initialDecision =
+        body.issueType === 'maintenance' && body.preferredPayment
+          ? { preferredPayment: body.preferredPayment }
+          : {}
+
       const rows = await sql`
         INSERT INTO issues (
           org_id, tenant_id, subject, status, severity, audience,
-          issue_type, management_owner, messages_json
+          issue_type, management_owner, decision_json, messages_json
         )
         VALUES (
           ${auth.orgId}, ${tenantId}, ${body.subject}, 'open',
           ${body.severity}, ${audience}, ${body.issueType}, ${managementOwner},
+          ${JSON.stringify(initialDecision)}::jsonb,
           ${JSON.stringify(messages)}::jsonb
         )
         RETURNING id, tenant_id, subject, status, severity, audience,
@@ -271,6 +352,11 @@ issuesRouter.patch('/:id', async (req, res, next) => {
             note: z.string().max(2000).optional(),
           })
           .optional(),
+        tenantPayment: z
+          .object({
+            method: z.enum(['invoice', 'deposit']),
+          })
+          .optional(),
       })
       .parse(req.body)
 
@@ -287,9 +373,10 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       existing.decision_json && typeof existing.decision_json === 'object'
         ? { ...(existing.decision_json as Record<string, unknown>) }
         : {}
-    const managementOwner = managementOwnerOf(existing as Record<string, unknown>)
+    const managementOwner = decidingManagerOf(existing as Record<string, unknown>)
     const issueType = String(existing.issue_type ?? 'general')
     const existingStatus = String(existing.status)
+    const tenantId = String(existing.tenant_id)
 
     if (body.reply) {
       if (existingStatus === 'resolved' || existingStatus === 'rejected') {
@@ -341,6 +428,7 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       const materials = d.materialsCost ?? 0
       const labour = d.labourCost ?? 0
       const decider = auth.role === 'landlord' ? 'landlord' : 'agent'
+      const preferredPayment = String(decision.preferredPayment ?? '')
       decision = {
         ...decision,
         outcome: d.outcome,
@@ -362,6 +450,13 @@ issuesRouter.patch('/:id', async (req, res, next) => {
         decidedAt: new Date().toISOString(),
         decidedBy: auth.role,
       }
+
+      // Keep snapshot in sync with live manager after handoff
+      await sql`
+        UPDATE issues
+        SET management_owner = ${managementOwner}
+        WHERE id = ${id} AND org_id = ${auth.orgId}
+      `
 
       if (d.outcome === 'reject') {
         status = 'rejected'
@@ -405,26 +500,85 @@ issuesRouter.patch('/:id', async (req, res, next) => {
           } Materials R${materials}, labour R${labour}, total R${materials + labour}. Correspondence is now open.`,
           at: new Date().toISOString(),
         })
+
+        if (
+          isTenantBillableDecision(issueType, decision) &&
+          preferredPayment === 'deposit'
+        ) {
+          await applyDepositDeduction({
+            orgId: auth.orgId,
+            tenantId,
+            amount: tenantBillableAmount(decision),
+            decision,
+            messages,
+          })
+        } else if (
+          isTenantBillableDecision(issueType, decision) &&
+          preferredPayment === 'invoice'
+        ) {
+          decision.tenantPaymentMethod = 'invoice'
+          messages.push({
+            id: crypto.randomUUID(),
+            author: 'tenant',
+            body: 'Tenant previously chose to be invoiced for maintenance if charged.',
+            at: new Date().toISOString(),
+          })
+        }
+      }
+    }
+
+    if (body.tenantPayment) {
+      if (auth.role !== 'tenant') {
+        throw new AppError(403, 'Only the tenant can choose how to pay for maintenance')
+      }
+      if (existingStatus === 'resolved' || existingStatus === 'rejected') {
+        throw new AppError(400, 'This ticket is closed')
+      }
+      if (!isTenantBillableDecision(issueType, decision)) {
+        throw new AppError(400, 'This ticket is not charged to the tenant')
+      }
+      if (decision.tenantPaymentMethod) {
+        throw new AppError(400, 'A payment method has already been chosen for this ticket')
+      }
+      if (body.tenantPayment.method === 'deposit') {
+        await applyDepositDeduction({
+          orgId: auth.orgId,
+          tenantId,
+          amount: tenantBillableAmount(decision),
+          decision,
+          messages,
+        })
+      } else {
+        decision.tenantPaymentMethod = 'invoice'
+        messages.push({
+          id: crypto.randomUUID(),
+          author: 'tenant',
+          body: 'Tenant chose to be invoiced for the maintenance charge.',
+          at: new Date().toISOString(),
+        })
       }
     }
 
     if (body.close) {
+      if (auth.role !== 'tenant') {
+        throw new AppError(403, 'Only the tenant can close a ticket')
+      }
       if (existingStatus === 'resolved' || existingStatus === 'rejected') {
         throw new AppError(400, 'This ticket is already closed')
       }
       if (!isTicketAccepted(decision)) {
         throw new AppError(400, 'Only an accepted ticket can be closed with an outcome')
       }
-      const closer =
-        auth.role === 'tenant'
-          ? 'tenant'
-          : auth.role === 'landlord'
-            ? 'landlord'
-            : 'agent'
+      const closer = 'tenant'
       const resultLabel =
         body.close.result === 'successful' ? 'successful' : 'not successful'
       decision = {
         ...decision,
+        // Preserve cost fields for historical unit expense tracking
+        materialsCost: decision.materialsCost,
+        labourCost: decision.labourCost,
+        totalCost: decision.totalCost,
+        workDescription: decision.workDescription,
         closureResult: body.close.result,
         closedAt: new Date().toISOString(),
         closedBy: closer,
@@ -436,7 +590,7 @@ issuesRouter.patch('/:id', async (req, res, next) => {
         author: closer,
         body:
           body.close.note?.trim() ||
-          `Ticket closed as ${resultLabel} by the ${closer}.`,
+          `Ticket closed as ${resultLabel} by the tenant.`,
         at: new Date().toISOString(),
       })
     }

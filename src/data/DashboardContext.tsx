@@ -70,6 +70,8 @@ function normalizeDashboard(raw: DashboardState): DashboardState {
       ...a,
       rent: Number(a.rent),
       deposit: Number(a.deposit),
+      depositBalance:
+        a.depositBalance != null ? Number(a.depositBalance) : Number(a.deposit),
       nextDueDate: a.nextDueDate ? String(a.nextDueDate).slice(0, 10) : undefined,
     })),
     tenants: (raw.tenants ?? []).map((t) => ({
@@ -433,6 +435,9 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         unitNumber: String(row.unit_number ?? input.unitNumber),
         rent: Number(row.rent ?? input.rent),
         deposit: Number(row.deposit ?? input.deposit),
+        depositBalance: Number(
+          row.deposit_balance ?? row.depositBalance ?? input.deposit,
+        ),
         landlordId: String(row.landlord_id ?? input.landlordId),
         status: (row.status as Apartment['status']) ?? input.status ?? 'vacant',
         nextDueDate: input.nextDueDate,

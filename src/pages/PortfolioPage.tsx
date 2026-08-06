@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useDashboard } from '../data/DashboardContext'
 import { isUnitVacant } from '../data/unitHelpers'
-import { formatMoney, paymentBadge, formatDate } from '../data/utils'
+import { formatMoney, paymentBadge, formatDate, nextMonthEndDate } from '../data/utils'
 
 type TableFilter = 'all' | 'active' | 'vacant' | 'balance' | 'issues'
 
@@ -10,6 +10,7 @@ export default function PortfolioPage() {
   const { state } = useDashboard()
   const [buildingId, setBuildingId] = useState('')
   const [filter, setFilter] = useState<TableFilter>('all')
+  const monthEndDue = nextMonthEndDate()
 
   const activeTenants = state.tenants.filter((t) => t.status !== 'former').length
   const vacantUnits = state.apartments.filter((a) =>
@@ -35,9 +36,19 @@ export default function PortfolioPage() {
             ).length
           : 0
         const badge = tenant
-          ? paymentBadge(tenant.balance, apartment.nextDueDate)
+          ? paymentBadge(tenant.balance, monthEndDue)
           : { label: 'Vacant', tone: 'neutral' as const }
-        return { apartment, building, tenant, vacant, openIssueCount, badge }
+        const depositBalance =
+          apartment.depositBalance != null ? apartment.depositBalance : apartment.deposit
+        return {
+          apartment,
+          building,
+          tenant,
+          vacant,
+          openIssueCount,
+          badge,
+          depositBalance,
+        }
       })
       .filter((row) => {
         if (filter === 'active') return Boolean(row.tenant)
@@ -46,7 +57,7 @@ export default function PortfolioPage() {
         if (filter === 'issues') return row.openIssueCount > 0
         return true
       })
-  }, [state, buildingId, filter])
+  }, [state, buildingId, filter, monthEndDue])
 
   function toggleFilter(next: TableFilter) {
     setFilter((prev) => (prev === next ? 'all' : next))
@@ -147,12 +158,13 @@ export default function PortfolioPage() {
                 <th>Building / unit</th>
                 <th>Rent</th>
                 <th>Next due</th>
+                <th>Deposit balance</th>
                 <th>Status</th>
                 <th>Issues</th>
               </tr>
             </thead>
             <tbody>
-              {rows.map(({ apartment, building, tenant, openIssueCount, badge }) => (
+              {rows.map(({ apartment, building, tenant, openIssueCount, badge, depositBalance }) => (
                 <tr key={apartment.id}>
                   <td>
                     {tenant ? (
@@ -177,7 +189,8 @@ export default function PortfolioPage() {
                     </div>
                   </td>
                   <td>{formatMoney(apartment.rent)}</td>
-                  <td>{tenant ? formatDate(apartment.nextDueDate) : '—'}</td>
+                  <td>{tenant ? formatDate(monthEndDue) : '—'}</td>
+                  <td>{tenant ? formatMoney(depositBalance) : '—'}</td>
                   <td>
                     <span className={`badge tone-${badge.tone}`}>{badge.label}</span>
                     {openIssueCount > 0 ? (

@@ -32,6 +32,35 @@ export function formatDateTime(value?: string) {
   })
 }
 
+/** Local dd/mm/yy HH:mm for invoice lists and chat timestamps. */
+export function formatDateTimeShort(value?: string) {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  const yy = String(d.getFullYear()).slice(-2)
+  const hh = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${dd}/${mm}/${yy} ${hh}:${min}`
+}
+
+/** Soonest upcoming calendar month-end (YYYY-MM-DD). */
+export function nextMonthEndDate(from: Date = new Date()): string {
+  const y = from.getFullYear()
+  const m = from.getMonth()
+  const endThisMonth = new Date(y, m + 1, 0)
+  const startOfToday = new Date(y, m, from.getDate())
+  const target =
+    startOfToday.getTime() >= endThisMonth.getTime()
+      ? new Date(y, m + 2, 0)
+      : endThisMonth
+  const ty = target.getFullYear()
+  const tm = String(target.getMonth() + 1).padStart(2, '0')
+  const td = String(target.getDate()).padStart(2, '0')
+  return `${ty}-${tm}-${td}`
+}
+
 export function paymentBadge(balance: number, nextDueDate?: string): {
   label: string
   tone: 'paid' | 'due' | 'overdue'

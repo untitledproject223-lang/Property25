@@ -34,6 +34,8 @@ export interface Apartment {
   unitNumber: string
   rent: number
   deposit: number
+  /** Remaining deposit after maintenance deductions; defaults to deposit. */
+  depositBalance?: number
   status: ApartmentStatus
   landlordId: string
   nextDueDate?: string
