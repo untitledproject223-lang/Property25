@@ -4,15 +4,13 @@ import { useDashboard } from '../data/DashboardContext'
 import './DashboardShell.css'
 
 const NAV = [
-  { to: '/', label: 'Portfolio', end: true },
-  { to: '/applications', label: 'Applications' },
-  { to: '/tenants', label: 'Tenants' },
+  { to: '/', label: 'Dashboard', end: true },
   { to: '/units', label: 'Units' },
-  { to: '/payments', label: 'Payments' },
+  { to: '/landlords', label: 'Landlord' },
+  { to: '/tenants', label: 'Tenants' },
   { to: '/invoices', label: 'Invoices' },
-  { to: '/issues', label: 'Issues' },
-  { to: '/landlords', label: 'Landlords' },
-  { to: '/apply', label: 'New application' },
+  { to: '/issues', label: 'Tickets' },
+  { to: '/applications', label: 'Applications' },
 ]
 
 export function DashboardShell() {

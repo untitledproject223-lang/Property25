@@ -82,7 +82,7 @@ export function LandlordShell() {
     <PortalShell
       title="Landlord Portal"
       nav={[
-        { to: '/landlord', label: 'Portfolio', end: true },
+        { to: '/landlord', label: 'Dashboard', end: true },
         { to: '/landlord/units', label: 'Units' },
         { to: '/landlord/invoices', label: 'Invoices' },
         { to: '/landlord/issues', label: 'Tickets' },

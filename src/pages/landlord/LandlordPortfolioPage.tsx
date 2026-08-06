@@ -46,7 +46,7 @@ export default function LandlordPortfolioPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <h1>Tenants & units</h1>
+          <h1>Dashboard</h1>
           <p>
             {landlord
               ? `Active tenants and the units they occupy for ${String(landlord.name)}.`

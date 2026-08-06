@@ -166,158 +166,173 @@ export default function InvoicesPage() {
           <h2>Create invoice</h2>
         </div>
         <form className="panel-body invoice-compose-form" onSubmit={submit}>
-          <label>
-            Tenant
-            <select
-              value={tenantId}
-              onChange={(e) => {
-                setTenantId(e.target.value)
-                setIssueId('')
-                setIncludeMaintenance(false)
-              }}
-              required
-            >
-              {state.tenants.map((t) => {
-                const ctx = tenantApartment(t.id)
-                return (
-                  <option key={t.id} value={t.id}>
-                    {t.name}
-                    {ctx ? ` — ${ctx.building.name} Unit ${ctx.apartment.unitNumber}` : ''}
-                  </option>
-                )
-              })}
-            </select>
-          </label>
-          <label>
-            Due date
-            <input
-              type="date"
-              value={dueDate}
-              onChange={(e) => setDueDate(e.target.value)}
-              required
-            />
-          </label>
-          <fieldset className="invoice-billing-inline">
-            <legend>Billing</legend>
-            <label className="check-inline">
-              <input
-                type="radio"
-                name="billingKind"
-                checked={billingKind === 'one_time' || Boolean(issueId)}
-                disabled={Boolean(issueId)}
-                onChange={() => setBillingKind('one_time')}
-              />
-              One-time
+          <div className="invoice-compose-row invoice-compose-row-4">
+            <label className="invoice-field">
+              <span>Tenant</span>
+              <select
+                value={tenantId}
+                onChange={(e) => {
+                  setTenantId(e.target.value)
+                  setIssueId('')
+                  setIncludeMaintenance(false)
+                }}
+                required
+              >
+                {state.tenants.map((t) => {
+                  const ctx = tenantApartment(t.id)
+                  return (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {ctx ? ` — ${ctx.building.name} Unit ${ctx.apartment.unitNumber}` : ''}
+                    </option>
+                  )
+                })}
+              </select>
             </label>
-            <label className="check-inline">
+            <label className="invoice-field">
+              <span>Due date</span>
               <input
-                type="radio"
-                name="billingKind"
-                checked={billingKind === 'recurring' && !issueId}
-                disabled={Boolean(issueId)}
-                onChange={() => setBillingKind('recurring')}
-              />
-              Recurring
-            </label>
-          </fieldset>
-          <label>
-            Ticket
-            <select value={issueId} onChange={(e) => onTicketChange(e.target.value)}>
-              <option value="">None</option>
-              {billableTickets.map((issue) => (
-                <option key={issue.id} value={issue.id}>
-                  {issue.subject}
-                </option>
-              ))}
-            </select>
-          </label>
-          {issueId ? (
-            <label>
-              Maintenance amount
-              <input
-                type="number"
-                min={0}
-                step="0.01"
-                value={maintenanceAmount}
-                onChange={(e) => setMaintenanceAmount(e.target.value)}
+                type="date"
+                value={dueDate}
+                onChange={(e) => setDueDate(e.target.value)}
                 required
               />
             </label>
+            <div className="invoice-billing-box">
+              <span className="invoice-field-label">Billing</span>
+              <div className="invoice-billing-options" role="radiogroup" aria-label="Billing">
+                <label className="check-inline">
+                  <input
+                    type="radio"
+                    name="billingKind"
+                    checked={billingKind === 'one_time' || Boolean(issueId)}
+                    disabled={Boolean(issueId)}
+                    onChange={() => setBillingKind('one_time')}
+                  />
+                  One-time
+                </label>
+                <label className="check-inline">
+                  <input
+                    type="radio"
+                    name="billingKind"
+                    checked={billingKind === 'recurring' && !issueId}
+                    disabled={Boolean(issueId)}
+                    onChange={() => setBillingKind('recurring')}
+                  />
+                  Recurring
+                </label>
+              </div>
+            </div>
+            <label className="invoice-field">
+              <span>Ticket</span>
+              <select value={issueId} onChange={(e) => onTicketChange(e.target.value)}>
+                <option value="">None</option>
+                {billableTickets.map((issue) => (
+                  <option key={issue.id} value={issue.id}>
+                    {issue.subject}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          {issueId ? (
+            <div className="invoice-compose-row">
+              <label className="invoice-field">
+                <span>Maintenance amount</span>
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={maintenanceAmount}
+                  onChange={(e) => setMaintenanceAmount(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
           ) : billingKind === 'one_time' ? (
             <>
+              <div className="invoice-line-options">
+                <label className="check-inline invoice-check-field">
+                  <input
+                    type="checkbox"
+                    checked={includeRent}
+                    onChange={(e) => setIncludeRent(e.target.checked)}
+                  />
+                  Rent
+                </label>
+                <label className="check-inline invoice-check-field">
+                  <input
+                    type="checkbox"
+                    checked={includeDeposit}
+                    onChange={(e) => setIncludeDeposit(e.target.checked)}
+                  />
+                  Deposit
+                </label>
+                <label className="check-inline invoice-check-field">
+                  <input
+                    type="checkbox"
+                    checked={includeAdmin}
+                    onChange={(e) => setIncludeAdmin(e.target.checked)}
+                  />
+                  Admin
+                </label>
+              </div>
+              <div className="invoice-compose-row invoice-compose-row-3">
+                {includeAdmin ? (
+                  <label className="invoice-field">
+                    <span>Admin amount</span>
+                    <input
+                      type="number"
+                      min={0}
+                      value={adminAmount}
+                      onChange={(e) => setAdminAmount(e.target.value)}
+                    />
+                  </label>
+                ) : null}
+                <label className="invoice-field">
+                  <span>One-time amount</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={oneTimeAmount}
+                    onChange={(e) => setOneTimeAmount(e.target.value)}
+                    placeholder="Optional custom amount"
+                  />
+                </label>
+                <label className="invoice-field">
+                  <span>One-time description</span>
+                  <input
+                    value={oneTimeDescription}
+                    onChange={(e) => setOneTimeDescription(e.target.value)}
+                    placeholder="Description for custom amount"
+                  />
+                </label>
+              </div>
+            </>
+          ) : (
+            <div className="invoice-line-options">
               <label className="check-inline invoice-check-field">
                 <input
                   type="checkbox"
                   checked={includeRent}
                   onChange={(e) => setIncludeRent(e.target.checked)}
                 />
-                Rent
+                Include monthly rent
               </label>
-              <label className="check-inline invoice-check-field">
-                <input
-                  type="checkbox"
-                  checked={includeDeposit}
-                  onChange={(e) => setIncludeDeposit(e.target.checked)}
-                />
-                Deposit
-              </label>
-              <label className="check-inline invoice-check-field">
-                <input
-                  type="checkbox"
-                  checked={includeAdmin}
-                  onChange={(e) => setIncludeAdmin(e.target.checked)}
-                />
-                Admin
-              </label>
-              {includeAdmin ? (
-                <label>
-                  Admin amount
-                  <input
-                    type="number"
-                    min={0}
-                    value={adminAmount}
-                    onChange={(e) => setAdminAmount(e.target.value)}
-                  />
-                </label>
-              ) : null}
-              <label>
-                One-time amount
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={oneTimeAmount}
-                  onChange={(e) => setOneTimeAmount(e.target.value)}
-                  placeholder="Optional custom amount"
-                />
-              </label>
-              <label>
-                One-time description
-                <input
-                  value={oneTimeDescription}
-                  onChange={(e) => setOneTimeDescription(e.target.value)}
-                  placeholder="Description for custom amount"
-                />
-              </label>
-            </>
-          ) : (
-            <label className="check-inline invoice-check-field">
-              <input
-                type="checkbox"
-                checked={includeRent}
-                onChange={(e) => setIncludeRent(e.target.checked)}
-              />
-              Include monthly rent
-            </label>
+            </div>
           )}
-          <label className="invoice-notes-field">
-            Reason
+
+          <label className="invoice-field invoice-notes-field">
+            <span>Reason</span>
             <input
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               placeholder="Why this invoice is being issued…"
             />
           </label>
+
           <div className="invoice-compose-actions">
             {formError ? <p className="login-error">{formError}</p> : null}
             {composeCtx ? (
@@ -325,7 +340,9 @@ export default function InvoicesPage() {
                 Rent {formatMoney(composeCtx.apartment.rent)} · deposit{' '}
                 {formatMoney(composeCtx.apartment.deposit)}
               </p>
-            ) : null}
+            ) : (
+              <span />
+            )}
             <button type="submit" className="btn btn-primary btn-compact" disabled={busy}>
               {busy ? 'Creating…' : 'Create & open'}
             </button>

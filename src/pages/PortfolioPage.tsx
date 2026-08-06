@@ -78,12 +78,9 @@ export default function PortfolioPage() {
     <div>
       <div className="page-header">
         <div>
-          <h1>Portfolio</h1>
+          <h1>Dashboard</h1>
           <p>Overview of tenants and units across your book.</p>
         </div>
-        <Link to="/apply" className="btn btn-primary btn-compact">
-          New application
-        </Link>
       </div>
 
       <div className="stat-grid stat-grid-4">
