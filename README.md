@@ -61,6 +61,7 @@ Every row/document is scoped by `org_id` (multi-tenant).
 ## Documentation
 | Doc | Description |
 |-----|-------------|
+| [docs/COWORKER-SETUP.md](docs/COWORKER-SETUP.md) | **Share with teammates** — clone, env, migrate, run, ship, debug |
 | [docs/DEPLOY.md](docs/DEPLOY.md) | Branch → GitHub → Render API → Midpoint cPanel (live URL) |
 | [docs/DEPLOY.pdf](docs/DEPLOY.pdf) | Same deploy manual as a printable PDF |
 | [docs/MILESTONES.md](docs/MILESTONES.md) | Design → production milestones (M0–M5) |
