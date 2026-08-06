@@ -87,6 +87,30 @@
   cursor: wait;
 }
 
+.login-secondary-btn {
+  margin-top: 0 !important;
+  background: transparent !important;
+  border: 1px solid rgba(207, 214, 224, 0.35) !important;
+  color: #d5e0e7 !important;
+}
+
+.login-secondary-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.login-signup-block {
+  display: grid;
+  gap: 0.65rem;
+  margin-top: 0.35rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid rgba(207, 214, 224, 0.18);
+}
+
+.login-signup-actions {
+  display: grid;
+  gap: 0.5rem;
+}
+
 .login-error {
   margin: 0;
   color: #ff8e8e;

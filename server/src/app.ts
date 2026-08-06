@@ -76,6 +76,7 @@ export function createApp() {
       docs: {
         health: 'GET /api/health',
         login: 'POST /api/auth/login',
+        signup: 'POST /api/auth/signup',
         me: 'GET /api/auth/me',
         dashboard: 'GET /api/dashboard (Bearer token)',
       },
@@ -84,6 +85,7 @@ export function createApp() {
 
   app.use('/api/health', healthRouter)
   app.use('/api/auth/login', loginLimiter)
+  app.use('/api/auth/signup', loginLimiter)
   app.use('/api/auth', authRouter)
   app.use('/api/invites', invitesRouter)
   app.use('/api/portal', portalRouter)

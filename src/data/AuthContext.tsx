@@ -13,6 +13,7 @@ import {
   getToken,
   login as apiLogin,
   setToken,
+  signup as apiSignup,
   type AuthUser,
 } from './api'
 
@@ -21,6 +22,14 @@ type AuthState = {
   loading: boolean
   error: string | null
   login: (email: string, password: string) => Promise<void>
+  signup: (input: {
+    role: 'agent' | 'landlord'
+    fullName: string
+    email: string
+    password: string
+    phone?: string
+    agencyName?: string
+  }) => Promise<void>
   acceptInvite: (input: {
     token: string
     fullName: string
@@ -66,6 +75,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(result.user)
   }, [])
 
+  const signup = useCallback(
+    async (input: {
+      role: 'agent' | 'landlord'
+      fullName: string
+      email: string
+      password: string
+      phone?: string
+      agencyName?: string
+    }) => {
+      setError(null)
+      const result = await apiSignup(input)
+      setUser(result.user)
+    },
+    [],
+  )
+
   const acceptInvite = useCallback(
     async (input: { token: string; fullName: string; password: string }) => {
       setError(null)
@@ -81,8 +106,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, loading, error, login, acceptInvite, logout, setUser }),
-    [user, loading, error, login, acceptInvite, logout],
+    () => ({ user, loading, error, login, signup, acceptInvite, logout, setUser }),
+    [user, loading, error, login, signup, acceptInvite, logout],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

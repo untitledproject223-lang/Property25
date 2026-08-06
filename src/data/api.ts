@@ -72,6 +72,26 @@ export async function login(email: string, password: string) {
   return result.data
 }
 
+export async function signup(input: {
+  role: 'agent' | 'landlord'
+  fullName: string
+  email: string
+  password: string
+  phone?: string
+  agencyName?: string
+}) {
+  const result = await apiRequest<{ data: { token: string; user: AuthUser } }>(
+    '/api/auth/signup',
+    {
+      method: 'POST',
+      body: input,
+      auth: false,
+    },
+  )
+  setToken(result.data.token)
+  return result.data
+}
+
 export async function fetchMe() {
   return apiRequest<{ data: AuthUser }>('/api/auth/me')
 }

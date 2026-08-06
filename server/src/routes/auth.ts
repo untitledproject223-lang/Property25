@@ -143,6 +143,155 @@ authRouter.post('/login', async (req, res, next) => {
   }
 })
 
+function slugifyBase(value: string) {
+  const base = value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+  return base || 'account'
+}
+
+async function uniqueOrgSlug(preferredName: string) {
+  const base = slugifyBase(preferredName)
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const suffix = Math.random().toString(36).slice(2, 8)
+    const slug = `${base}-${suffix}`
+    const existing = await sql`
+      SELECT id FROM organisations WHERE slug = ${slug} LIMIT 1
+    `
+    if (existing.length === 0) return slug
+  }
+  return `${base}-${Date.now().toString(36)}`
+}
+
+const signupSchema = z.object({
+  role: z.enum(['agent', 'landlord']),
+  fullName: z.string().min(1).max(160),
+  email: z.string().email(),
+  password: z.string().min(6).max(120),
+  phone: z.string().min(5).max(40).optional(),
+  agencyName: z.string().min(1).max(160).optional(),
+})
+
+authRouter.post('/signup', async (req, res, next) => {
+  try {
+    const body = signupSchema.parse(req.body)
+    const email = body.email.trim().toLowerCase()
+    const fullName = body.fullName.trim()
+    const phone = (body.phone ?? '').trim() || '+27000000000'
+
+    const existing = await sql`
+      SELECT id FROM users WHERE lower(email) = lower(${email}) LIMIT 1
+    `
+    if (existing.length > 0) {
+      throw new AppError(409, 'An account with this email already exists. Please sign in.')
+    }
+
+    const passwordHash = await bcrypt.hash(body.password, 10)
+
+    if (body.role === 'agent') {
+      const orgName = (body.agencyName ?? '').trim() || `${fullName} Agency`
+      const slug = await uniqueOrgSlug(orgName)
+      const orgRows = await sql`
+        INSERT INTO organisations (name, slug)
+        VALUES (${orgName}, ${slug})
+        RETURNING id, name, slug
+      `
+      const org = orgRows[0]
+      await sql`
+        INSERT INTO billing_accounts (org_id, plan_tier, credit_balance)
+        VALUES (${org.id}, 'starter', 0)
+      `
+      const userRows = await sql`
+        INSERT INTO users (email, full_name, password_hash)
+        VALUES (${email}, ${fullName}, ${passwordHash})
+        RETURNING id, email, full_name
+      `
+      const user = userRows[0]
+      await sql`
+        INSERT INTO org_members (org_id, user_id, role)
+        VALUES (${org.id}, ${user.id}, 'agent')
+      `
+
+      const token = await signAccessToken({
+        sub: String(user.id),
+        orgId: String(org.id),
+        role: 'agent',
+        email: String(user.email),
+        name: String(user.full_name),
+      })
+
+      res.status(201).json({
+        data: {
+          token,
+          user: {
+            id: user.id,
+            email: user.email,
+            name: user.full_name,
+            role: 'agent' as const,
+            profileId: null,
+            org: { id: org.id, name: org.name, slug: org.slug },
+          },
+        },
+      })
+      return
+    }
+
+    // Landlord signup: own org workspace + landlords profile linked to user
+    const orgName = `${fullName} Portfolio`
+    const slug = await uniqueOrgSlug(orgName)
+    const orgRows = await sql`
+      INSERT INTO organisations (name, slug)
+      VALUES (${orgName}, ${slug})
+      RETURNING id, name, slug
+    `
+    const org = orgRows[0]
+    await sql`
+      INSERT INTO billing_accounts (org_id, plan_tier, credit_balance)
+      VALUES (${org.id}, 'starter', 0)
+    `
+    const userRows = await sql`
+      INSERT INTO users (email, full_name, password_hash)
+      VALUES (${email}, ${fullName}, ${passwordHash})
+      RETURNING id, email, full_name
+    `
+    const user = userRows[0]
+    const landlordRows = await sql`
+      INSERT INTO landlords (org_id, name, email, phone, user_id)
+      VALUES (${org.id}, ${fullName}, ${email}, ${phone}, ${user.id})
+      RETURNING id
+    `
+    const profileId = String(landlordRows[0].id)
+
+    const token = await signAccessToken({
+      sub: String(user.id),
+      orgId: String(org.id),
+      role: 'landlord',
+      email: String(user.email),
+      name: String(user.full_name),
+      profileId,
+    })
+
+    res.status(201).json({
+      data: {
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.full_name,
+          role: 'landlord' as const,
+          profileId,
+          org: { id: org.id, name: org.name, slug: org.slug },
+        },
+      },
+    })
+  } catch (err) {
+    next(err)
+  }
+})
+
+
 authRouter.post('/change-password', requireAuth, async (req, res, next) => {
   try {
     const body = z
