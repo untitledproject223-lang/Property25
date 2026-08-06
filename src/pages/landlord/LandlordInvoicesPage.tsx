@@ -3,7 +3,6 @@ import {
   fetchLandlordInvoices,
   fetchLandlordTenants,
   listIssues,
-  patchInvoice,
 } from '../../data/api'
 import {
   invoiceReason,
@@ -413,17 +412,6 @@ export default function LandlordInvoicesPage() {
                       >
                         View
                       </Link>
-                      {inv.status === 'sent' || inv.status === 'overdue' ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-compact"
-                          onClick={() =>
-                            void patchInvoice(String(inv.id), { status: 'paid' }).then(refresh)
-                          }
-                        >
-                          Mark paid
-                        </button>
-                      ) : null}
                     </div>
                   </td>
                 </tr>

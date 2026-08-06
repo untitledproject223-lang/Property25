@@ -136,6 +136,11 @@ function UnitSelectField({
   const { user } = useAuth()
   const { state } = useDashboard()
   const landlordLocked = isLandlordInitiated(data) || user?.role === 'landlord'
+  const [portfolioLoaded, setPortfolioLoaded] = useState(false)
+  const [landlordProfile, setLandlordProfile] = useState<{
+    id: string
+    name: string
+  } | null>(null)
   const [landlordUnits, setLandlordUnits] = useState<
     Array<{
       id: string
@@ -156,6 +161,12 @@ function UnitSelectField({
     fetchLandlordPortfolio()
       .then((r) => {
         if (cancelled) return
+        const landlord = r.data.landlord
+        const id = landlord?.id ? String(landlord.id) : ''
+        const name = landlord?.name ? String(landlord.name) : user?.name || 'You'
+        if (id) {
+          setLandlordProfile({ id, name })
+        }
         const units = (r.data.units ?? []).map((u) => ({
           id: String(u.id),
           unitNumber: String(u.unitNumber ?? ''),
@@ -163,25 +174,47 @@ function UnitSelectField({
           deposit: Number(u.deposit) || 0,
           buildingName: String(u.buildingName ?? ''),
           buildingAddress: String(u.buildingAddress ?? ''),
-          landlordId: u.landlordId ? String(u.landlordId) : undefined,
-          landlordName: r.data.landlord?.name ? String(r.data.landlord.name) : undefined,
+          landlordId: id || undefined,
+          landlordName: name,
           tenantId: u.tenantId ? String(u.tenantId) : null,
         }))
         setLandlordUnits(units)
-        const landlord = r.data.landlord
-        if (landlord?.id) {
-          onChange('landlordId', String(landlord.id))
-          onChange('landlordName', String(landlord.name ?? ''))
-        }
+        setPortfolioLoaded(true)
       })
-      .catch(() => undefined)
+      .catch(() => {
+        if (!cancelled) setPortfolioLoaded(true)
+      })
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.role])
+  }, [user?.role, user?.name])
 
-  const landlordId = str(data, 'landlordId')
+  // Keep form data in sync with the signed-in landlord profile (even if field updates
+  // were previously blocked while the step was still unlocking).
+  useEffect(() => {
+    if (!landlordProfile) return
+    if (str(data, 'landlordId') !== landlordProfile.id) {
+      onChange('landlordId', landlordProfile.id)
+    }
+    if (str(data, 'landlordName') !== landlordProfile.name) {
+      onChange('landlordName', landlordProfile.name)
+    }
+    if (user?.role === 'landlord' && str(data, 'initiatedBy') !== 'landlord') {
+      onChange('initiatedBy', 'landlord')
+    }
+    // Intentionally depend on profile + current ids only to avoid update loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    landlordProfile,
+    data.landlordId,
+    data.landlordName,
+    data.initiatedBy,
+    user?.role,
+  ])
+
+  const landlordId = str(data, 'landlordId') || landlordProfile?.id || ''
+  const landlordName =
+    str(data, 'landlordName') || landlordProfile?.name || user?.name || 'You'
   const vacant =
     user?.role === 'landlord'
       ? landlordUnits.filter((u) => !u.tenantId)
@@ -233,6 +266,10 @@ function UnitSelectField({
         onChange('adminFeeAmount', DEFAULT_ADMIN_FEE)
         onChange('listingRef', `${apartment.buildingName}-${apartment.unitNumber}`)
         onChange('amountType', 'monthly-rent')
+        if (landlordProfile) {
+          onChange('landlordId', landlordProfile.id)
+          onChange('landlordName', landlordProfile.name)
+        }
       }
       return
     }
@@ -262,27 +299,31 @@ function UnitSelectField({
     }
   }
 
+  const unitSelectEnabled =
+    user?.role === 'landlord' ? portfolioLoaded && Boolean(landlordId) : Boolean(landlordId)
+
   return (
     <>
       <label className="field field-span">
         <span className="field-label">Landlord</span>
-        <select
-          value={landlordId}
-          onChange={(e) => selectLandlord(e.target.value)}
-          disabled={landlordLocked}
-          className={landlordLocked ? 'input-filled-locked' : undefined}
-        >
-          <option value="">Choose a landlord…</option>
-          {user?.role === 'landlord' ? (
-            <option value={landlordId}>{str(data, 'landlordName') || 'You'}</option>
-          ) : (
-            state.landlords.map((l) => (
+        {landlordLocked ? (
+          <input
+            className="input-filled-locked"
+            type="text"
+            value={landlordName}
+            readOnly
+            aria-readonly="true"
+          />
+        ) : (
+          <select value={landlordId} onChange={(e) => selectLandlord(e.target.value)}>
+            <option value="">Choose a landlord…</option>
+            {state.landlords.map((l) => (
               <option key={l.id} value={l.id}>
                 {l.name} · {l.email}
               </option>
-            ))
-          )}
-        </select>
+            ))}
+          </select>
+        )}
         <span className="field-hint">
           {landlordLocked
             ? 'Pre-filled for this landlord-led application.'
@@ -294,24 +335,30 @@ function UnitSelectField({
         <select
           value={selectedId}
           onChange={(e) => selectUnit(e.target.value)}
-          disabled={!landlordId}
+          disabled={!unitSelectEnabled}
         >
           <option value="">
-            {landlordId ? 'Choose a vacant unit…' : 'Select a landlord first…'}
+            {user?.role === 'landlord'
+              ? !portfolioLoaded
+                ? 'Loading your units…'
+                : 'Choose a vacant unit…'
+              : landlordId
+                ? 'Choose a vacant unit…'
+                : 'Select a landlord first…'}
           </option>
-          {vacant.map((apartment) => {
-            const label =
-              'buildingName' in apartment
-                ? `${apartment.buildingName} · Unit ${apartment.unitNumber}`
-                : (() => {
-                    const b = state.buildings.find(
-                      (x) => x.id === (apartment as { buildingId: string }).buildingId,
-                    )
-                    return `${b?.name ?? 'Building'} · Unit ${(apartment as { unitNumber: string }).unitNumber}`
-                  })()
+          {vacant.map((a) => {
+            if ('buildingName' in a && a.buildingName) {
+              return (
+                <option key={a.id} value={a.id}>
+                  {a.buildingName} · Unit {a.unitNumber} · {formatMoney(a.rent)}/mo
+                </option>
+              )
+            }
+            const apt = a as { id: string; unitNumber: string; rent: number; buildingId: string }
+            const b = state.buildings.find((x) => x.id === apt.buildingId)
             return (
-              <option key={apartment.id} value={apartment.id}>
-                {label} · {formatMoney(apartment.rent)}/mo
+              <option key={apt.id} value={apt.id}>
+                {b?.name ?? 'Building'} · Unit {apt.unitNumber} · {formatMoney(apt.rent)}/mo
               </option>
             )
           })}

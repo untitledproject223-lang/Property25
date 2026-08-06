@@ -171,21 +171,28 @@ export default function ApplicationPage() {
 
   const currentStage = STAGES[currentIndex]
   const isLast = currentIndex === STAGES.length - 1
+  // New landlord applications must unlock inquiry immediately (before async seed).
+  const permissionFormData = useMemo(() => {
+    if (!routeId && isLandlord && !isLandlordInitiated(formData)) {
+      return { ...formData, initiatedBy: 'landlord' }
+    }
+    return formData
+  }, [routeId, isLandlord, formData])
   const activeIndex = useMemo(
-    () => activeStageIndex(completed, formData),
-    [completed, formData],
+    () => activeStageIndex(completed, permissionFormData),
+    [completed, permissionFormData],
   )
   const holders = useMemo(
-    () => progressHolders(completed, formData),
-    [completed, formData],
+    () => progressHolders(completed, permissionFormData),
+    [completed, permissionFormData],
   )
   const allComplete = STAGES.every((s) =>
-    isStageFullyComplete(s.id, completed, formData),
+    isStageFullyComplete(s.id, completed, permissionFormData),
   )
 
   const isActiveStep = currentIndex === activeIndex && !allComplete
-  const stageComplete = isStageFullyComplete(currentStage.id, completed, formData)
-  const canEdit = canEditStage(currentStage.id, user?.role, formData)
+  const stageComplete = isStageFullyComplete(currentStage.id, completed, permissionFormData)
+  const canEdit = canEditStage(currentStage.id, user?.role, permissionFormData)
   const waitingOn = holders && isActiveStep ? holders.waitingOn : []
   const iAmWaitingParty = roleCanAct(waitingOn, user?.role)
   const isSharedStep = currentStage.id === 'lease' || currentStage.id === 'movein'
@@ -193,11 +200,12 @@ export default function ApplicationPage() {
     ? (currentStage.id as 'lease' | 'movein')
     : null
   const advancePending = isSharedStep
-    ? pendingAdvanceForStage(currentStage.id, formData)
+    ? pendingAdvanceForStage(currentStage.id, permissionFormData)
     : []
   const iHaveAdvanced =
-    Boolean(sharedStageId) && partyHasAdvanced(sharedStageId!, formData, user?.role)
-  const landlordLed = isLandlordInitiated(formData)
+    Boolean(sharedStageId) &&
+    partyHasAdvanced(sharedStageId!, permissionFormData, user?.role)
+  const landlordLed = isLandlordInitiated(permissionFormData)
 
   const mode: 'edit' | 'view' | 'waiting' | 'observing' =
     currentStage.id === 'success'
@@ -380,7 +388,9 @@ export default function ApplicationPage() {
   }
 
   function updateField(key: string, value: unknown) {
-    if (!editable) return
+    // Allow landlord profile seeding even before the inquiry step unlocks.
+    const seedKeys = new Set(['landlordId', 'landlordName', 'initiatedBy'])
+    if (!editable && !seedKeys.has(key)) return
     setFormData((prev) => {
       const next = { ...prev, [key]: value }
       formDataRef.current = next
