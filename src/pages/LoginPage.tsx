@@ -1,17 +1,23 @@
 import { useState, type FormEvent } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import { useAuth } from '../data/AuthContext'
 import { homePathForRole } from '../portal/homePath'
 import './LoginPage.css'
 
 export default function LoginPage() {
   const { user, loading, login } = useAuth()
+  const [searchParams] = useSearchParams()
+  const next = searchParams.get('next')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  if (!loading && user) return <Navigate to={homePathForRole(user)} replace />
+  if (!loading && user) {
+    const safeNext =
+      next && next.startsWith('/') && !next.startsWith('//') ? next : null
+    return <Navigate to={safeNext || homePathForRole(user)} replace />
+  }
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -32,8 +38,9 @@ export default function LoginPage() {
         <p className="login-eyebrow">Property25</p>
         <h1>Sign in</h1>
         <p className="login-sub">
-          Agents, tenants, and landlords sign in with the email used for their invite or
-          agency account.
+          {next?.startsWith('/unit-invite/')
+            ? 'Sign in with your agent account to accept the unit.'
+            : 'Use your Property25 account to continue.'}
         </p>
 
         <label>
@@ -42,19 +49,18 @@ export default function LoginPage() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            autoComplete="username"
             required
+            autoComplete="username"
           />
         </label>
-
         <label>
           Password
           <input
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            autoComplete="current-password"
             required
+            autoComplete="current-password"
           />
         </label>
 

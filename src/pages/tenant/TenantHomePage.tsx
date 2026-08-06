@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useAuth } from '../../data/AuthContext'
 import { fetchTenantStays } from '../../data/api'
-import { formatMoney } from '../../data/utils'
+import { formatDate, formatMoney } from '../../data/utils'
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -79,9 +79,10 @@ export default function TenantHomePage() {
           </p>
           <dl className="success-panel-meta" style={{ width: '100%' }}>
             <div>
-              <dt>Lease</dt>
+              <dt>Lease term</dt>
               <dd>
-                {String(current.leaseStart)} → {String(current.leaseEnd)}
+                {formatDate(String(current.leaseStart ?? ''))} →{' '}
+                {formatDate(String(current.leaseEnd ?? ''))}
               </dd>
             </div>
             <div>
@@ -114,10 +115,11 @@ export default function TenantHomePage() {
               <dd>
                 {String(current.landlordName)}
                 {current.landlordEmail ? ` · ${String(current.landlordEmail)}` : ''}
+                {current.landlordPhone ? ` · ${String(current.landlordPhone)}` : ''}
               </dd>
             </div>
             <div>
-              <dt>Balance</dt>
+              <dt>Current month balance</dt>
               <dd>{formatMoney(Number(current.balance) || 0)}</dd>
             </div>
           </dl>

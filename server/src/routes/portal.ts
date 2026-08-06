@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { sql } from '../db/client.js'
+import { generateInviteToken, hashInviteToken } from '../lib/inviteToken.js'
+import { unitAgentInviteLink } from '../lib/publicUrl.js'
 import { requireAuth, requireTenant, requireLandlord, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 
@@ -306,6 +308,9 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         COALESCE(a.deposit_balance, a.deposit)::float8 AS "depositBalance",
         a.status,
         a.ticket_manager AS "ticketManager",
+        a.managing_agent_id AS "managingAgentId",
+        ma.full_name AS "managingAgentName",
+        ma.email AS "managingAgentEmail",
         b.name AS "buildingName",
         b.address AS "buildingAddress",
         t.id AS "tenantId",
@@ -313,6 +318,7 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         t.email AS "tenantEmail",
         t.phone AS "tenantPhone",
         t.status AS "tenantStatus",
+        t.balance::float8 AS balance,
         t.lease_start AS "leaseStart",
         t.lease_end AS "leaseEnd",
         (
@@ -321,6 +327,7 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         ) AS "openIssues"
       FROM apartments a
       JOIN buildings b ON b.id = a.building_id
+      LEFT JOIN users ma ON ma.id = a.managing_agent_id
       LEFT JOIN tenants t ON t.apartment_id = a.id
         AND t.status IN ('active', 'notice')
         AND t.application_id IS NOT NULL
@@ -528,6 +535,74 @@ portalRouter.get('/landlord/tenants', requireLandlord, async (req, res, next) =>
   }
 })
 
+const terminateLeaseSchema = z.object({
+  reason: z.string().min(1).max(2000),
+  depositPaidOut: z.boolean(),
+  terminationDate: z.string().date(),
+})
+
+/** Landlord: terminate a lease on their unit and free it immediately. */
+portalRouter.post(
+  '/landlord/tenants/:id/terminate',
+  requireLandlord,
+  async (req, res, next) => {
+    try {
+      const id = z.string().uuid().parse(req.params.id)
+      const body = terminateLeaseSchema.parse(req.body)
+
+      const existing = await sql`
+        SELECT t.id, t.apartment_id, t.status
+        FROM tenants t
+        JOIN apartments a ON a.id = t.apartment_id
+        JOIN landlords l ON l.id = a.landlord_id
+        WHERE t.id = ${id}
+          AND t.org_id = ${req.orgId!}
+          AND l.user_id = ${req.auth!.sub}
+        LIMIT 1
+      `
+      if (existing.length === 0) throw new AppError(404, 'Tenant not found')
+      if (String(existing[0].status) === 'former') {
+        throw new AppError(400, 'This lease is already terminated')
+      }
+
+      const apartmentId = String(existing[0].apartment_id)
+
+      const rows = await sql`
+        UPDATE tenants
+        SET
+          status = 'former',
+          lease_end = ${body.terminationDate},
+          termination_reason = ${body.reason.trim()},
+          deposit_paid_out = ${body.depositPaidOut},
+          terminated_at = ${body.terminationDate},
+          updated_at = now()
+        WHERE id = ${id} AND org_id = ${req.orgId!}
+        RETURNING id, apartment_id AS "apartmentId", name, status,
+          lease_end AS "leaseEnd",
+          termination_reason AS "terminationReason",
+          deposit_paid_out AS "depositPaidOut",
+          terminated_at AS "terminatedAt"
+      `
+
+      await sql`
+        UPDATE apartments
+        SET
+          status = 'vacant',
+          deposit_balance = CASE
+            WHEN ${body.depositPaidOut} THEN 0
+            ELSE deposit_balance
+          END,
+          updated_at = now()
+        WHERE id = ${apartmentId} AND org_id = ${req.orgId!}
+      `
+
+      res.json({ data: rows[0] })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
+
 /** Agent helper: invite landlord */
 portalRouter.post('/agent/invite-landlord', requireAgent, async (req, res, next) => {
   try {
@@ -539,6 +614,142 @@ portalRouter.post('/agent/invite-landlord', requireAgent, async (req, res, next)
     `
     if (l.length === 0) throw new AppError(404, 'Landlord not found')
     res.json({ data: { landlordId: l[0].id, email: l[0].email } })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Landlord: create a shareable link for an agent to accept admin rights on a unit */
+portalRouter.post(
+  '/landlord/units/:id/agent-invite',
+  requireLandlord,
+  async (req, res, next) => {
+    try {
+      const id = z.string().uuid().parse(req.params.id)
+      const owned = await sql`
+        SELECT a.id, a.unit_number AS "unitNumber", b.name AS "buildingName"
+        FROM apartments a
+        JOIN buildings b ON b.id = a.building_id
+        JOIN landlords l ON l.id = a.landlord_id
+        WHERE a.id = ${id}
+          AND l.user_id = ${req.auth!.sub}
+          AND a.org_id = ${req.orgId!}
+        LIMIT 1
+      `
+      if (owned.length === 0) throw new AppError(404, 'Unit not found')
+
+      const { token, tokenHash } = generateInviteToken()
+      const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000)
+      await sql`
+        INSERT INTO unit_agent_invites (
+          org_id, apartment_id, token_hash, expires_at, invited_by
+        )
+        VALUES (
+          ${req.orgId!}, ${id}, ${tokenHash}, ${expiresAt.toISOString()}, ${req.auth!.sub}
+        )
+      `
+
+      const inviteUrl = unitAgentInviteLink(token)
+      res.status(201).json({
+        data: {
+          inviteUrl,
+          unitNumber: owned[0].unitNumber,
+          buildingName: owned[0].buildingName,
+          expiresAt,
+        },
+      })
+    } catch (err) {
+      next(err)
+    }
+  },
+)
+
+/** Peek unit agent invite (any authenticated user — typically an agent) */
+portalRouter.get('/unit-agent-invites/:token', async (req, res, next) => {
+  try {
+    const token = z.string().min(16).parse(req.params.token)
+    const tokenHash = hashInviteToken(token)
+    const rows = await sql`
+      SELECT
+        i.id,
+        i.expires_at AS "expiresAt",
+        i.accepted_at AS "acceptedAt",
+        a.id AS "apartmentId",
+        a.unit_number AS "unitNumber",
+        b.name AS "buildingName",
+        b.address AS "buildingAddress",
+        l.name AS "landlordName",
+        o.name AS "orgName"
+      FROM unit_agent_invites i
+      JOIN apartments a ON a.id = i.apartment_id
+      JOIN buildings b ON b.id = a.building_id
+      JOIN landlords l ON l.id = a.landlord_id
+      JOIN organisations o ON o.id = i.org_id
+      WHERE i.token_hash = ${tokenHash}
+      LIMIT 1
+    `
+    if (rows.length === 0) throw new AppError(404, 'Invite not found')
+    const invite = rows[0]
+    if (invite.acceptedAt) throw new AppError(410, 'Invite already accepted')
+    if (new Date(String(invite.expiresAt)) < new Date()) {
+      throw new AppError(410, 'Invite has expired')
+    }
+    res.json({ data: invite })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Agent accepts unit admin rights */
+portalRouter.post('/unit-agent-invites/:token/accept', requireAgent, async (req, res, next) => {
+  try {
+    const token = z.string().min(16).parse(req.params.token)
+    const tokenHash = hashInviteToken(token)
+    const rows = await sql`
+      SELECT id, org_id, apartment_id, expires_at, accepted_at
+      FROM unit_agent_invites
+      WHERE token_hash = ${tokenHash}
+      LIMIT 1
+    `
+    if (rows.length === 0) throw new AppError(404, 'Invite not found')
+    const invite = rows[0]
+    if (invite.accepted_at) throw new AppError(410, 'Invite already accepted')
+    if (new Date(String(invite.expires_at)) < new Date()) {
+      throw new AppError(410, 'Invite has expired')
+    }
+    if (String(invite.org_id) !== req.orgId!) {
+      throw new AppError(403, 'This invite belongs to a different organisation')
+    }
+
+    await sql`
+      UPDATE apartments
+      SET
+        managing_agent_id = ${req.auth!.sub},
+        ticket_manager = 'agent',
+        updated_at = now()
+      WHERE id = ${invite.apartment_id} AND org_id = ${req.orgId!}
+    `
+    await sql`
+      UPDATE unit_agent_invites
+      SET accepted_at = now(), accepted_by = ${req.auth!.sub}
+      WHERE id = ${invite.id}
+    `
+    await sql`
+      UPDATE issues i
+      SET management_owner = 'agent', updated_at = now()
+      FROM tenants t
+      WHERE t.id = i.tenant_id
+        AND t.apartment_id = ${invite.apartment_id}
+        AND i.org_id = ${req.orgId!}
+        AND i.status IN ('open', 'pending')
+    `
+
+    res.json({
+      data: {
+        apartmentId: invite.apartment_id,
+        accepted: true,
+      },
+    })
   } catch (err) {
     next(err)
   }

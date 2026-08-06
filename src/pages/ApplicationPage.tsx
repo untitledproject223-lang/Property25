@@ -6,6 +6,7 @@ import {
   activeStageIndex,
   canEditStage,
   formatPartyList,
+  isLandlordInitiated,
   isStageFullyComplete,
   isStageReachable,
   markPartyAdvanced,
@@ -21,6 +22,7 @@ import { useDashboard } from '../data/DashboardContext'
 import {
   createApplication,
   createInvite,
+  createTenant,
   fetchApplication,
   patchApplication,
   saveApplicationScreening,
@@ -118,6 +120,8 @@ export default function ApplicationPage() {
   const navigate = useNavigate()
   const { user } = useAuth()
   const isAgent = user?.role === 'admin' || user?.role === 'agent'
+  const isLandlord = user?.role === 'landlord'
+  const canStartApplication = isAgent || isLandlord
   const { completeApplication } = useDashboard()
 
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -130,16 +134,33 @@ export default function ApplicationPage() {
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(Boolean(routeId))
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [inviteCopied, setInviteCopied] = useState(false)
 
   // Prefill locked agent fields from the signed-in agent for new applications
   useEffect(() => {
     if (routeId) return
-    if (!user || (user.role !== 'admin' && user.role !== 'agent')) return
+    if (!user) return
+    if (user.role === 'landlord') {
+      setFormData((prev) => {
+        if (asString(prev.applicationId)) return prev
+        return {
+          ...prev,
+          initiatedBy: 'landlord',
+          agentName: '',
+          agency: '',
+          agentEmail: '',
+          agentPhone: '',
+        }
+      })
+      return
+    }
+    if (user.role !== 'admin' && user.role !== 'agent') return
     const seeded = agentFieldsFromUser(user)
     setFormData((prev) => {
       if (asString(prev.applicationId)) return prev
       return {
         ...prev,
+        initiatedBy: 'agent',
         agentName: seeded.agentName,
         agency: seeded.agency,
         agentEmail: seeded.agentEmail,
@@ -164,7 +185,7 @@ export default function ApplicationPage() {
 
   const isActiveStep = currentIndex === activeIndex && !allComplete
   const stageComplete = isStageFullyComplete(currentStage.id, completed, formData)
-  const canEdit = canEditStage(currentStage.id, user?.role)
+  const canEdit = canEditStage(currentStage.id, user?.role, formData)
   const waitingOn = holders && isActiveStep ? holders.waitingOn : []
   const iAmWaitingParty = roleCanAct(waitingOn, user?.role)
   const isSharedStep = currentStage.id === 'lease' || currentStage.id === 'movein'
@@ -176,6 +197,7 @@ export default function ApplicationPage() {
     : []
   const iHaveAdvanced =
     Boolean(sharedStageId) && partyHasAdvanced(sharedStageId!, formData, user?.role)
+  const landlordLed = isLandlordInitiated(formData)
 
   const mode: 'edit' | 'view' | 'waiting' | 'observing' =
     currentStage.id === 'success'
@@ -190,8 +212,9 @@ export default function ApplicationPage() {
                 currentStage.id === 'lease' &&
                   (user?.role === 'admin' || user?.role === 'agent')
                 ? 'edit'
-                : // Tenant stays on move-in only to acknowledge (agent alone clicks Next).
-                  currentStage.id === 'movein' && user?.role === 'tenant'
+                : // Tenant / landlord stay on move-in to acknowledge.
+                  currentStage.id === 'movein' &&
+                    (user?.role === 'tenant' || user?.role === 'landlord')
                   ? 'edit'
                   : iHaveAdvanced
                     ? 'observing'
@@ -335,7 +358,7 @@ export default function ApplicationPage() {
         status: STAGE_STATUS[stageIdRef.current] ?? 'in_progress',
         formData: snapshot,
         completedStages: Array.from(completedRef.current),
-        ...(isAgent
+        ...(isAgent || isLandlord
           ? {
               apartmentId: asString(snapshot.apartmentId) || null,
               applicantName: asString(snapshot.applicantName) || undefined,
@@ -375,8 +398,8 @@ export default function ApplicationPage() {
     const existing = asString(data.applicationId)
     if (existing) return existing
 
-    if (!isAgent) {
-      throw new Error('Only an agent can start a new application.')
+    if (!canStartApplication) {
+      throw new Error('Only an agent or landlord can start a new application.')
     }
 
     const name = asString(data.applicantName).trim()
@@ -397,13 +420,20 @@ export default function ApplicationPage() {
       applicantPhone: phone || undefined,
       status: 'in_progress',
       inviteApplicant: true,
-      formData: data,
+      formData: {
+        ...data,
+        initiatedBy: isLandlord ? 'landlord' : asString(data.initiatedBy) || 'agent',
+      },
     })
     const id = String(result.data.id)
     if (result.data.invite?.inviteUrl) {
       setInviteUrl(result.data.invite.inviteUrl)
     }
-    setFormData((prev) => ({ ...prev, applicationId: id }))
+    setFormData((prev) => ({
+      ...prev,
+      applicationId: id,
+      initiatedBy: isLandlord ? 'landlord' : asString(prev.initiatedBy) || 'agent',
+    }))
     navigate(`/apply/${id}`, { replace: true })
     return id
   }
@@ -421,9 +451,28 @@ export default function ApplicationPage() {
       if (!asString(formData.applicantName).trim() || !asString(formData.applicantEmail).trim()) {
         return 'Applicant name and email are required before continuing.'
       }
+      if (Number(asString(formData.occupantCount) || '1') >= 2) {
+        if (
+          !asString(formData.applicant2Name).trim() ||
+          !asString(formData.applicant2Email).trim() ||
+          !asString(formData.applicant2Phone).trim()
+        ) {
+          return 'Second applicant full name, email, and phone are required when there are 2 applicants.'
+        }
+      }
     }
     if (currentStage.id === 'kyc') {
-      if (!formData.agentKycApproved) {
+      if (boolFlag(formData.kycAffordabilityRejected)) {
+        return 'This application was rejected based on affordability. It cannot continue.'
+      }
+      if (!boolFlag(formData.kycAffordabilityApproved) && landlordLed) {
+        return 'Approve the income & expenses outcome before continuing to KYC.'
+      }
+      if (landlordLed) {
+        if (!boolFlag(formData.landlordKycApproved) && !boolFlag(formData.tenantKycApproved)) {
+          return 'Landlord or tenant KYC approval is required before continuing.'
+        }
+      } else if (!formData.agentKycApproved) {
         return 'Agent approval is required before continuing.'
       }
     }
@@ -442,19 +491,44 @@ export default function ApplicationPage() {
     }
     if (currentStage.id === 'movein') {
       if (user?.role === 'tenant') {
-        return 'Acknowledge the apartment condition with the checkbox. Only the agent can click Next to finish.'
+        return landlordLed
+          ? 'Acknowledge the apartment condition with the checkbox. Only the landlord can click Next to finish.'
+          : 'Acknowledge the apartment condition with the checkbox. Only the agent can click Next to finish.'
       }
-      if (user?.role === 'landlord') {
-        return 'Move-in is completed by the agent and tenant. Please wait for the agent to continue.'
-      }
-      if (!partyHasSigned('movein', formData, 'agent')) {
-        return 'Confirm the inspection is accurate before clicking Next.'
-      }
-      if (!partyHasSigned('movein', formData, 'tenant')) {
-        return 'The tenant must acknowledge the recorded condition before you can continue.'
+      if (landlordLed) {
+        if (user?.role === 'landlord') {
+          if (!partyHasSigned('movein', formData, 'landlord')) {
+            return 'Confirm the move-in inspection acknowledgment before clicking Next.'
+          }
+          if (!partyHasSigned('movein', formData, 'tenant')) {
+            return 'The tenant must acknowledge the recorded condition before you can continue.'
+          }
+        } else if (user?.role === 'admin' || user?.role === 'agent') {
+          return 'This landlord-led move-in is completed by the landlord and tenant.'
+        }
+      } else {
+        if (user?.role === 'landlord') {
+          if (!partyHasSigned('movein', formData, 'landlord')) {
+            return 'Acknowledge the move-in inspection before the agent can finish.'
+          }
+          return 'Acknowledgment saved. Waiting for the agent to click Next.'
+        }
+        if (!partyHasSigned('movein', formData, 'agent')) {
+          return 'Confirm the inspection is accurate before clicking Next.'
+        }
+        if (!partyHasSigned('movein', formData, 'tenant')) {
+          return 'The tenant must acknowledge the recorded condition before you can continue.'
+        }
+        if (!partyHasSigned('movein', formData, 'landlord')) {
+          return 'The landlord must acknowledge the move-in inspection before you can continue.'
+        }
       }
     }
     return null
+  }
+
+  function boolFlag(value: unknown): boolean {
+    return value === true || value === 'true' || value === 1 || value === '1'
   }
 
   async function persistProgress(
@@ -471,7 +545,7 @@ export default function ApplicationPage() {
       completenessPct,
       formData: nextForm,
       completedStages: Array.from(nextCompleted),
-      ...(isAgent
+      ...(isAgent || isLandlord
         ? {
             apartmentId: asString(nextForm.apartmentId) || null,
             applicantName: asString(nextForm.applicantName) || undefined,
@@ -487,35 +561,68 @@ export default function ApplicationPage() {
     nextForm: Record<string, unknown>,
     nextCompleted: Set<StageId>,
   ) {
-    if (assignedTenantId || !isAgent) return
+    if (assignedTenantId) return
+    if (!isAgent && !isLandlord) return
     const apartmentId = asString(nextForm.apartmentId)
     if (!apartmentId) return
 
-    const tenant = await completeApplication({
-      apartmentId,
-      applicationId,
-      name: asString(nextForm.applicantName),
-      email: asString(nextForm.applicantEmail),
-      phone: asString(nextForm.applicantPhone),
-      leaseStart: asString(nextForm.moveInDate) || asString(nextForm.leaseStartDate),
-      leaseEnd: asString(nextForm.termEndDate) || asString(nextForm.leaseEndDate),
-      agentName: asString(nextForm.agentName),
-      moveInSummary: asString(nextForm.inspectionNotes) || undefined,
-    })
-    if (!tenant) return
+    let tenantId: string | null = null
+    if (isAgent) {
+      const tenant = await completeApplication({
+        apartmentId,
+        applicationId,
+        name: asString(nextForm.applicantName),
+        email: asString(nextForm.applicantEmail),
+        phone: asString(nextForm.applicantPhone),
+        leaseStart: asString(nextForm.moveInDate) || asString(nextForm.leaseStartDate),
+        leaseEnd: asString(nextForm.termEndDate) || asString(nextForm.leaseEndDate),
+        agentName: asString(nextForm.agentName),
+        moveInSummary: asString(nextForm.inspectionNotes) || undefined,
+      })
+      if (!tenant) return
+      tenantId = tenant.id
+    } else {
+      const result = await createTenant({
+        apartmentId,
+        applicationId,
+        name: asString(nextForm.applicantName).trim() || 'New tenant',
+        email: asString(nextForm.applicantEmail).trim() || 'tenant@example.com',
+        phone: asString(nextForm.applicantPhone).trim() || '0000000000',
+        leaseStart:
+          asString(nextForm.moveInDate) ||
+          asString(nextForm.leaseStartDate) ||
+          new Date().toISOString().slice(0, 10),
+        leaseEnd:
+          asString(nextForm.termEndDate) ||
+          asString(nextForm.leaseEndDate) ||
+          new Date().toISOString().slice(0, 10),
+        status: 'active',
+        balance: 0,
+        moveInInspection: asString(nextForm.inspectionNotes)
+          ? {
+              date: new Date().toISOString().slice(0, 10),
+              agent: asString(nextForm.landlordName) || 'Landlord',
+              summary: asString(nextForm.inspectionNotes),
+            }
+          : undefined,
+      })
+      tenantId = String(result.data.id)
+    }
 
-    setAssignedTenantId(tenant.id)
-    setFormData((prev) => ({ ...prev, tenantId: tenant.id }))
+    if (!tenantId) return
+
+    setAssignedTenantId(tenantId)
+    setFormData((prev) => ({ ...prev, tenantId }))
     await patchApplication(applicationId, {
       status: 'tenant',
       completenessPct: 100,
-      formData: { ...nextForm, tenantId: tenant.id },
+      formData: { ...nextForm, tenantId },
       completedStages: Array.from(nextCompleted),
     })
 
     const creditScore = Number(asString(nextForm.creditScore))
     const grossSalary = Number(asString(nextForm.grossSalary || nextForm.incomeGross))
-    const targetRent = Number(asString(nextForm.targetRent || nextForm.rentAmount))
+    const targetRent = Number(asString(nextForm.targetRent || nextForm.apartmentAmount))
     let band: 'green' | 'amber' | 'red' = 'amber'
     const rec = asString(nextForm.creditRecommendation).toLowerCase()
     if (
@@ -526,7 +633,8 @@ export default function ApplicationPage() {
       band = 'red'
     } else if (
       rec.includes('approve') ||
-      asString(nextForm.kycStatus).toLowerCase() === 'pass'
+      asString(nextForm.kycStatus).toLowerCase() === 'pass' ||
+      asString(nextForm.kycStatus).toLowerCase() === 'verified'
     ) {
       band = 'green'
     }
@@ -554,7 +662,7 @@ export default function ApplicationPage() {
         grossSalary: Number.isFinite(grossSalary) ? grossSalary : null,
         targetRent: Number.isFinite(targetRent) ? targetRent : null,
       },
-      linkTenantId: tenant.id,
+      linkTenantId: tenantId,
     }).catch(() => {})
   }
 
@@ -569,7 +677,7 @@ export default function ApplicationPage() {
         status: STAGE_STATUS[currentStage.id] ?? 'in_progress',
         formData: nextForm,
         completedStages: Array.from(completed),
-        ...(isAgent
+        ...(isAgent || isLandlord
           ? {
               apartmentId: asString(nextForm.apartmentId) || null,
               applicantName: asString(nextForm.applicantName) || undefined,
@@ -667,7 +775,7 @@ export default function ApplicationPage() {
         if (sharedStageId === 'movein') {
           nextCompleted.add('success')
           setCompleted(nextCompleted)
-          if (!assignedTenantId && isAgent) {
+          if (!assignedTenantId && (isAgent || isLandlord)) {
             await finaliseTenancy(applicationId, nextForm, nextCompleted)
           } else {
             await persistProgress(applicationId, nextCompleted, nextForm, 'success')
@@ -700,6 +808,10 @@ export default function ApplicationPage() {
         applicationId,
       })
       setInviteUrl(result.data.inviteUrl)
+      void navigator.clipboard.writeText(result.data.inviteUrl).then(() => {
+        setInviteCopied(true)
+        window.setTimeout(() => setInviteCopied(false), 2000)
+      })
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create invite')
     }
@@ -718,16 +830,16 @@ export default function ApplicationPage() {
     setCurrentIndex(index)
   }
 
-  // If an agent reaches success after another party clicked the last move-in Next, finalise.
+  // If agent/landlord reaches success after another party clicked the last move-in Next, finalise.
   useEffect(() => {
     if (currentStage.id !== 'success') return
-    if (!isAgent || assignedTenantId) return
+    if ((!isAgent && !isLandlord) || assignedTenantId) return
     const applicationId = asString(formData.applicationId) || routeId
     if (!applicationId) return
     if (pendingAdvanceForStage('movein', formData).length > 0) return
     void finaliseTenancy(applicationId, formData, new Set(completed).add('success'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStage.id, isAgent, assignedTenantId, formData.applicationId, routeId])
+  }, [currentStage.id, isAgent, isLandlord, assignedTenantId, formData.applicationId, routeId])
 
   if (loading) {
     return (
@@ -817,7 +929,23 @@ export default function ApplicationPage() {
       {inviteUrl ? (
         <p className="role-callout role-agent" style={{ margin: '0 1.5rem 1rem' }} role="status">
           <strong>Applicant invite link</strong>
-          <span style={{ wordBreak: 'break-all' }}>{inviteUrl}</span>
+          <span className="invite-link-row">
+            <span style={{ wordBreak: 'break-all' }}>{inviteUrl}</span>
+            <button
+              type="button"
+              className="invite-copy-btn"
+              title={inviteCopied ? 'Copied' : 'Copy invite link'}
+              aria-label={inviteCopied ? 'Copied' : 'Copy invite link'}
+              onClick={() => {
+                void navigator.clipboard.writeText(inviteUrl).then(() => {
+                  setInviteCopied(true)
+                  window.setTimeout(() => setInviteCopied(false), 2000)
+                })
+              }}
+            >
+              {inviteCopied ? '✓' : '⧉'}
+            </button>
+          </span>
         </p>
       ) : null}
 
@@ -861,7 +989,7 @@ export default function ApplicationPage() {
                 Back
               </button>
 
-              {isAgent && asString(formData.applicationId) ? (
+              {(isAgent || isLandlord) && asString(formData.applicationId) ? (
                 <button
                   type="button"
                   className="btn btn-ghost"

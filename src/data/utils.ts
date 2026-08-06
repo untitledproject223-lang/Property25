@@ -10,6 +10,16 @@ export function formatMoney(amount: number) {
 
 export function formatDate(value?: string) {
   if (!value) return '—'
+  const raw = String(value).slice(0, 10)
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    const [y, m, d] = raw.split('-').map(Number)
+    const local = new Date(y, m - 1, d)
+    return local.toLocaleDateString('en-ZA', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    })
+  }
   const d = new Date(value)
   if (Number.isNaN(d.getTime())) return value
   return d.toLocaleDateString('en-ZA', {
@@ -17,6 +27,12 @@ export function formatDate(value?: string) {
     month: 'short',
     day: 'numeric',
   })
+}
+
+/** YYYY-MM-DD calendar date without time. */
+export function toDateOnly(value?: string | null) {
+  if (!value) return ''
+  return String(value).slice(0, 10)
 }
 
 export function formatDateTime(value?: string) {

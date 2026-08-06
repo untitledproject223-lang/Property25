@@ -93,8 +93,11 @@ function withSharedStageCompletion(
   if (isDoneFlag(form.leaseNextTenant) && isDoneFlag(form.leaseNextLandlord)) {
     next.add('lease')
   }
-  // Move-in unlocks when the agent clicks Next.
-  if (isDoneFlag(form.moveinNextAgent)) {
+  // Move-in: agent Next (agent-led) or landlord Next (landlord-initiated).
+  if (
+    isDoneFlag(form.moveinNextAgent) ||
+    (String(form.initiatedBy ?? '') === 'landlord' && isDoneFlag(form.moveinNextLandlord))
+  ) {
     next.add('movein')
     next.add('success')
   }
@@ -249,8 +252,12 @@ const createApplicationSchema = z.object({
   formData: z.record(z.unknown()).optional(),
 })
 
-applicationsRouter.post('/', requireAgent, async (req, res, next) => {
+applicationsRouter.post('/', async (req, res, next) => {
   try {
+    const auth = req.auth!
+    if (auth.role !== 'admin' && auth.role !== 'agent' && auth.role !== 'landlord') {
+      throw new AppError(403, 'Only an agent or landlord can start an application')
+    }
     const body = createApplicationSchema.parse(req.body)
 
     if (!body.apartmentId) {
@@ -258,9 +265,35 @@ applicationsRouter.post('/', requireAgent, async (req, res, next) => {
     }
 
     const apt = await sql`
-      SELECT id FROM apartments WHERE id = ${body.apartmentId} AND org_id = ${req.orgId!} LIMIT 1
+      SELECT a.id, a.landlord_id
+      FROM apartments a
+      WHERE a.id = ${body.apartmentId} AND a.org_id = ${auth.orgId}
+      LIMIT 1
     `
     if (apt.length === 0) throw new AppError(400, 'apartmentId not found in this org')
+
+    if (auth.role === 'landlord') {
+      const owned = await sql`
+        SELECT a.id
+        FROM apartments a
+        JOIN landlords l ON l.id = a.landlord_id
+        WHERE a.id = ${body.apartmentId}
+          AND l.user_id = ${auth.sub}
+          AND a.org_id = ${auth.orgId}
+        LIMIT 1
+      `
+      if (owned.length === 0) {
+        throw new AppError(403, 'You can only start applications on your own units')
+      }
+    }
+
+    const initiatedBy =
+      String((body.formData as Record<string, unknown> | undefined)?.initiatedBy ?? '') ===
+      'landlord'
+        ? 'landlord'
+        : 'agent'
+
+    const assignedAgentId = auth.role === 'landlord' ? null : auth.sub
 
     const rows = await sql`
       INSERT INTO applications (
@@ -268,9 +301,9 @@ applicationsRouter.post('/', requireAgent, async (req, res, next) => {
         assigned_agent_id
       )
       VALUES (
-        ${req.orgId!}, ${body.apartmentId ?? null}, ${body.status},
+        ${auth.orgId}, ${body.apartmentId ?? null}, ${body.status},
         ${body.applicantName}, ${body.applicantEmail}, ${body.applicantPhone ?? null},
-        ${req.auth!.sub}
+        ${assignedAgentId}
       )
       RETURNING id, org_id, apartment_id, assigned_agent_id, status,
         applicant_name, applicant_email, applicant_phone, completeness_pct,
@@ -278,21 +311,24 @@ applicationsRouter.post('/', requireAgent, async (req, res, next) => {
     `
 
     const appId = String(rows[0].id)
-    const formJson = body.formData ?? {}
+    const formJson = {
+      ...(body.formData ?? {}),
+      initiatedBy,
+    }
 
     await sql`
       INSERT INTO application_payloads (application_id, org_id, form_json, completed_stages)
-      VALUES (${appId}, ${req.orgId!}, ${JSON.stringify(formJson)}::jsonb, '[]'::jsonb)
+      VALUES (${appId}, ${auth.orgId}, ${JSON.stringify(formJson)}::jsonb, '[]'::jsonb)
     `
 
     await sql`
       INSERT INTO audit_events (org_id, action, entity_type, entity_id, meta_json)
       VALUES (
-        ${req.orgId!},
+        ${auth.orgId},
         'application.created',
         'application',
         ${appId},
-        ${JSON.stringify({ email: body.applicantEmail })}::jsonb
+        ${JSON.stringify({ email: body.applicantEmail, initiatedBy })}::jsonb
       )
     `
 
@@ -305,8 +341,8 @@ applicationsRouter.post('/', requireAgent, async (req, res, next) => {
           org_id, email, role, token_hash, expires_at, application_id, invited_by
         )
         VALUES (
-          ${req.orgId!}, ${body.applicantEmail.trim().toLowerCase()}, 'tenant',
-          ${tokenHash}, ${expiresAt.toISOString()}, ${appId}, ${req.auth!.sub}
+          ${auth.orgId}, ${body.applicantEmail.trim().toLowerCase()}, 'tenant',
+          ${tokenHash}, ${expiresAt.toISOString()}, ${appId}, ${auth.sub}
         )
       `
       const url = inviteLink(token)
@@ -391,9 +427,9 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
     const body = patchSchema.parse(req.body)
     const auth = req.auth!
 
-    // Only agents may change apartment / core applicant identity fields.
-    // Tenants/landlords may still save form progress; ignore identity fields from them.
-    if (auth.role !== 'admin' && auth.role !== 'agent') {
+    // Agents and landlords may change apartment / core applicant identity fields.
+    // Tenants may still save form progress; ignore identity fields from them.
+    if (auth.role !== 'admin' && auth.role !== 'agent' && auth.role !== 'landlord') {
       if (
         body.apartmentId !== undefined ||
         body.applicantName !== undefined ||
@@ -411,7 +447,7 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
         ? (body.formData as Record<string, unknown>).apartmentId
         : undefined
     const resolvedApartmentId =
-      auth.role === 'admin' || auth.role === 'agent'
+      auth.role === 'admin' || auth.role === 'agent' || auth.role === 'landlord'
         ? body.apartmentId !== undefined && body.apartmentId !== null
           ? body.apartmentId
           : typeof formApartmentId === 'string' && formApartmentId.length > 0
@@ -428,6 +464,9 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
       if (apt.length === 0) throw new AppError(400, 'apartmentId not found in this org')
     }
 
+    const canSetIdentity =
+      auth.role === 'admin' || auth.role === 'agent' || auth.role === 'landlord'
+
     const rows = await sql`
       UPDATE applications
       SET
@@ -435,14 +474,10 @@ applicationsRouter.patch('/:id', async (req, res, next) => {
         completeness_pct = COALESCE(${body.completenessPct ?? null}, completeness_pct),
         apartment_id = COALESCE(${resolvedApartmentId}, apartment_id),
         applicant_name = COALESCE(${
-          auth.role === 'admin' || auth.role === 'agent'
-            ? (body.applicantName ?? null)
-            : null
+          canSetIdentity ? (body.applicantName ?? null) : null
         }, applicant_name),
         applicant_email = COALESCE(${
-          auth.role === 'admin' || auth.role === 'agent'
-            ? (body.applicantEmail ?? null)
-            : null
+          canSetIdentity ? (body.applicantEmail ?? null) : null
         }, applicant_email),
         applicant_phone = COALESCE(${body.applicantPhone ?? null}, applicant_phone),
         updated_at = now()

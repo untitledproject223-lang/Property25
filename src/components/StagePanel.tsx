@@ -244,7 +244,7 @@ export function StagePanel({
             {mode === 'view'
               ? 'This step is finished. You can review it, but later steps stay locked until the current pending party acts.'
               : stage.id === 'kyc'
-                ? 'Agent approval is required before continuing.'
+                ? 'Approve or reject based on income risk and KYC before continuing.'
                 : stage.id === 'documents'
                   ? 'Both consent checkboxes are required before continuing.'
                   : 'Complete your required fields, then continue.'}
@@ -256,10 +256,14 @@ export function StagePanel({
         className={`stage-panel-body${viewOnly ? ' stage-view-only' : ''}${waiting ? ' stage-body-waiting' : ''}${observing ? ' stage-body-observing' : ''}`}
       >
         <fieldset disabled={viewOnly} className="stage-fieldset">
-          {stage.id === 'inquiry' && <InquiryForm data={formData} onChange={onChange} />}
+          {stage.id === 'inquiry' && (
+            <InquiryForm data={formData} onChange={onChange} viewerRole={viewerRole} />
+          )}
           {stage.id === 'documents' && <DocumentsForm data={formData} onChange={onChange} />}
           {stage.id === 'kycFees' && <KycFeesForm data={formData} onChange={onChange} />}
-          {stage.id === 'kyc' && <KycForm data={formData} onChange={onChange} />}
+          {stage.id === 'kyc' && (
+            <KycForm data={formData} onChange={onChange} viewerRole={viewerRole} />
+          )}
           {stage.id === 'payment' && <PaymentForm data={formData} onChange={onChange} />}
           {stage.id === 'lease' && (
             <LeaseForm data={formData} onChange={onChange} viewerRole={viewerRole} />

@@ -14,3 +14,7 @@ export function appPublicBaseUrl(): string {
 export function inviteLink(token: string): string {
   return `${appPublicBaseUrl()}/#/invite/${token}`
 }
+
+export function unitAgentInviteLink(token: string): string {
+  return `${appPublicBaseUrl()}/#/unit-invite/${token}`
+}

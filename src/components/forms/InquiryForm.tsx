@@ -1,10 +1,16 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import './forms.css'
+import { useAuth } from '../../data/AuthContext'
 import { useDashboard } from '../../data/DashboardContext'
 import { vacantApartments } from '../../data/unitHelpers'
 import { formatMoney } from '../../data/utils'
-import { fileToBase64, uploadDocument, type AuthRole } from '../../data/api'
-import { leaseSignatureStatuses, moveInSignStatuses } from '../../stages'
+import {
+  fetchLandlordPortfolio,
+  fileToBase64,
+  uploadDocument,
+  type AuthRole,
+} from '../../data/api'
+import { isLandlordInitiated, leaseSignatureStatuses, moveInSignStatuses } from '../../stages'
 
 /** Default admin / KYC check fee when a unit is selected (ZAR). */
 const DEFAULT_ADMIN_FEE = '350'
@@ -127,22 +133,82 @@ function UnitSelectField({
   data: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
 }) {
+  const { user } = useAuth()
   const { state } = useDashboard()
+  const landlordLocked = isLandlordInitiated(data) || user?.role === 'landlord'
+  const [landlordUnits, setLandlordUnits] = useState<
+    Array<{
+      id: string
+      unitNumber: string
+      rent: number
+      deposit: number
+      buildingName: string
+      buildingAddress: string
+      landlordId?: string
+      landlordName?: string
+      tenantId?: string | null
+    }>
+  >([])
+
+  useEffect(() => {
+    if (user?.role !== 'landlord') return
+    let cancelled = false
+    fetchLandlordPortfolio()
+      .then((r) => {
+        if (cancelled) return
+        const units = (r.data.units ?? []).map((u) => ({
+          id: String(u.id),
+          unitNumber: String(u.unitNumber ?? ''),
+          rent: Number(u.rent) || 0,
+          deposit: Number(u.deposit) || 0,
+          buildingName: String(u.buildingName ?? ''),
+          buildingAddress: String(u.buildingAddress ?? ''),
+          landlordId: u.landlordId ? String(u.landlordId) : undefined,
+          landlordName: r.data.landlord?.name ? String(r.data.landlord.name) : undefined,
+          tenantId: u.tenantId ? String(u.tenantId) : null,
+        }))
+        setLandlordUnits(units)
+        const landlord = r.data.landlord
+        if (landlord?.id) {
+          onChange('landlordId', String(landlord.id))
+          onChange('landlordName', String(landlord.name ?? ''))
+        }
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role])
+
   const landlordId = str(data, 'landlordId')
-  const vacant = vacantApartments(state.apartments, state.tenants).filter((a) =>
-    landlordId ? a.landlordId === landlordId : false,
-  )
+  const vacant =
+    user?.role === 'landlord'
+      ? landlordUnits.filter((u) => !u.tenantId)
+      : vacantApartments(state.apartments, state.tenants).filter((a) =>
+          landlordId ? a.landlordId === landlordId : false,
+        )
   const selectedId = str(data, 'apartmentId')
-  const selected = state.apartments.find((a) => a.id === selectedId)
-  const building = selected
-    ? state.buildings.find((b) => b.id === selected.buildingId)
-    : undefined
+  const selectedLandlordUnit =
+    user?.role === 'landlord'
+      ? landlordUnits.find((a) => a.id === selectedId)
+      : undefined
+  const selectedAgentUnit =
+    user?.role === 'landlord'
+      ? undefined
+      : state.apartments.find((a) => a.id === selectedId)
+  const selected = selectedLandlordUnit ?? selectedAgentUnit
+  const building = selectedLandlordUnit
+    ? { name: selectedLandlordUnit.buildingName, address: selectedLandlordUnit.buildingAddress }
+    : selectedAgentUnit
+      ? state.buildings.find((b) => b.id === selectedAgentUnit.buildingId)
+      : undefined
 
   function selectLandlord(id: string) {
+    if (landlordLocked) return
     onChange('landlordId', id)
     const landlord = state.landlords.find((l) => l.id === id)
     onChange('landlordName', landlord?.name ?? '')
-    // Clear unit when landlord changes
     onChange('apartmentId', '')
     onChange('propertyAddress', '')
     onChange('unitNumber', '')
@@ -153,6 +219,23 @@ function UnitSelectField({
   }
 
   function selectUnit(id: string) {
+    if (user?.role === 'landlord') {
+      const apartment = landlordUnits.find((a) => a.id === id)
+      onChange('apartmentId', id)
+      if (apartment) {
+        onChange(
+          'propertyAddress',
+          `${apartment.buildingAddress}, Unit ${apartment.unitNumber}`,
+        )
+        onChange('unitNumber', apartment.unitNumber)
+        onChange('apartmentAmount', String(apartment.rent))
+        onChange('apartmentDeposit', String(apartment.deposit))
+        onChange('adminFeeAmount', DEFAULT_ADMIN_FEE)
+        onChange('listingRef', `${apartment.buildingName}-${apartment.unitNumber}`)
+        onChange('amountType', 'monthly-rent')
+      }
+      return
+    }
     const apartment = state.apartments.find((a) => a.id === id)
     const b = apartment
       ? state.buildings.find((x) => x.id === apartment.buildingId)
@@ -183,16 +266,27 @@ function UnitSelectField({
     <>
       <label className="field field-span">
         <span className="field-label">Landlord</span>
-        <select value={landlordId} onChange={(e) => selectLandlord(e.target.value)}>
+        <select
+          value={landlordId}
+          onChange={(e) => selectLandlord(e.target.value)}
+          disabled={landlordLocked}
+          className={landlordLocked ? 'input-filled-locked' : undefined}
+        >
           <option value="">Choose a landlord…</option>
-          {state.landlords.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.name} · {l.email}
-            </option>
-          ))}
+          {user?.role === 'landlord' ? (
+            <option value={landlordId}>{str(data, 'landlordName') || 'You'}</option>
+          ) : (
+            state.landlords.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name} · {l.email}
+              </option>
+            ))
+          )}
         </select>
         <span className="field-hint">
-          Select the landlord first. Only their vacant units will appear below.
+          {landlordLocked
+            ? 'Pre-filled for this landlord-led application.'
+            : 'Select the landlord first. Only their vacant units will appear below.'}
         </span>
       </label>
       <label className="field field-span">
@@ -206,11 +300,18 @@ function UnitSelectField({
             {landlordId ? 'Choose a vacant unit…' : 'Select a landlord first…'}
           </option>
           {vacant.map((apartment) => {
-            const b = state.buildings.find((x) => x.id === apartment.buildingId)
+            const label =
+              'buildingName' in apartment
+                ? `${apartment.buildingName} · Unit ${apartment.unitNumber}`
+                : (() => {
+                    const b = state.buildings.find(
+                      (x) => x.id === (apartment as { buildingId: string }).buildingId,
+                    )
+                    return `${b?.name ?? 'Building'} · Unit ${(apartment as { unitNumber: string }).unitNumber}`
+                  })()
             return (
               <option key={apartment.id} value={apartment.id}>
-                {b?.name ?? 'Building'} · Unit {apartment.unitNumber} ·{' '}
-                {formatMoney(apartment.rent)}/mo
+                {label} · {formatMoney(apartment.rent)}/mo
               </option>
             )
           })}
@@ -221,9 +322,18 @@ function UnitSelectField({
       </label>
       {selected && building ? (
         <>
+          <p className="field-hint field-span">
+            Selected: {(building as { address?: string }).address ?? ''} · Unit{' '}
+            {selected.unitNumber}
+          </p>
           <label className="field field-span">
             <span className="field-label">Property address</span>
-            <input className="input-filled-locked" type="text" value={building.address} readOnly />
+            <input
+              className="input-filled-locked"
+              type="text"
+              value={String((building as { address?: string }).address ?? '')}
+              readOnly
+            />
           </label>
           <label className="field">
             <span className="field-label">Unit number</span>
@@ -331,19 +441,36 @@ function InspectionItem({
   label,
   data,
   onChange,
+  canEdit,
+  onLabelChange,
 }: {
   id: string
   label: string
   data: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
+  canEdit: boolean
+  onLabelChange?: (value: string) => void
 }) {
   return (
     <div className="inspection-item">
-      <span className="inspection-item-label">{label}</span>
+      {onLabelChange ? (
+        <input
+          type="text"
+          className="inspection-item-label-input"
+          value={label}
+          onChange={(e) => onLabelChange(e.target.value)}
+          placeholder="Feature name"
+          disabled={!canEdit}
+          aria-label="House feature name"
+        />
+      ) : (
+        <span className="inspection-item-label">{label}</span>
+      )}
       <select
         value={str(data, `${id}Condition`)}
         onChange={(e) => onChange(`${id}Condition`, e.target.value)}
         aria-label={`${label} condition`}
+        disabled={!canEdit}
       >
         <option value="">Condition…</option>
         <option value="excellent">Excellent</option>
@@ -358,16 +485,51 @@ function InspectionItem({
         onChange={(e) => onChange(`${id}Notes`, e.target.value)}
         placeholder="Notes / defects"
         aria-label={`${label} notes`}
+        disabled={!canEdit}
       />
+      <label className="inspection-item-upload" title="Upload photo for this item">
+        <input
+          type="file"
+          accept="image/*"
+          disabled={!canEdit}
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (!file || !canEdit) return
+            void (async () => {
+              try {
+                onChange(`${id}PhotoUploading`, true)
+                await persistUpload(data, `inspection-${id}`, file)
+                onChange(`${id}Photo`, file.name)
+              } catch (err) {
+                onChange(
+                  `${id}PhotoError`,
+                  err instanceof Error ? err.message : 'Upload failed',
+                )
+              } finally {
+                onChange(`${id}PhotoUploading`, false)
+              }
+            })()
+          }}
+        />
+        <span>
+          {bool(data, `${id}PhotoUploading`)
+            ? '…'
+            : str(data, `${id}Photo`)
+              ? '✓'
+              : '📷'}
+        </span>
+      </label>
     </div>
   )
 }
 
-export function InquiryForm({ data, onChange }: FormProps) {
+export function InquiryForm({ data, onChange, viewerRole }: FormProps) {
   const agreementTerm = str(data, 'agreementTerm')
   const moveInDate = str(data, 'moveInDate')
   const fixedTermMonths = termMonthsFromAgreement(agreementTerm)
   const termEndEditable = agreementTerm === 'other'
+  const landlordLed = isLandlordInitiated(data) || viewerRole === 'landlord'
+  const occupantCount = Number(str(data, 'occupantCount') || '1')
 
   function setMoveInDate(value: string) {
     onChange('moveInDate', value)
@@ -386,59 +548,66 @@ export function InquiryForm({ data, onChange }: FormProps) {
 
   return (
     <div className="form-grid">
-      <div className="role-callout role-agent" role="note">
-        <strong>Editable by agent / realtor only.</strong>
+      <div className={`role-callout ${landlordLed ? 'role-shared' : 'role-agent'}`} role="note">
+        <strong>
+          {landlordLed
+            ? 'Editable by landlord.'
+            : 'Editable by agent / realtor only.'}
+        </strong>
         <span>
-          Agent details are pre-filled and locked. Choose the landlord and unit, then
-          capture the applicant contacts.
+          {landlordLed
+            ? 'Your landlord profile is pre-filled. Choose a vacant unit and capture the applicant contacts.'
+            : 'Agent details are pre-filled and locked. Choose the landlord and unit, then capture the applicant contacts.'}
         </span>
       </div>
 
-      <fieldset className="form-section form-section-locked">
-        <legend>1. Agent / realtor details</legend>
-        <p className="field-hint field-span">
-          Pre-completed for this session — not editable.
-        </p>
-        <label className="field">
-          <span className="field-label">Agent / realtor name</span>
-          <input
-            className="input-filled-locked"
-            type="text"
-            value={str(data, 'agentName')}
-            readOnly
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Agency / brokerage</span>
-          <input
-            className="input-filled-locked"
-            type="text"
-            value={str(data, 'agency')}
-            readOnly
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Agent email</span>
-          <input
-            className="input-filled-locked"
-            type="email"
-            value={str(data, 'agentEmail')}
-            readOnly
-          />
-        </label>
-        <label className="field">
-          <span className="field-label">Agent phone</span>
-          <input
-            className="input-filled-locked"
-            type="tel"
-            value={str(data, 'agentPhone')}
-            readOnly
-          />
-        </label>
-      </fieldset>
+      {!landlordLed ? (
+        <fieldset className="form-section form-section-locked">
+          <legend>1. Agent / realtor details</legend>
+          <p className="field-hint field-span">
+            Pre-completed for this session — not editable.
+          </p>
+          <label className="field">
+            <span className="field-label">Agent / realtor name</span>
+            <input
+              className="input-filled-locked"
+              type="text"
+              value={str(data, 'agentName')}
+              readOnly
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Agency / brokerage</span>
+            <input
+              className="input-filled-locked"
+              type="text"
+              value={str(data, 'agency')}
+              readOnly
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Agent email</span>
+            <input
+              className="input-filled-locked"
+              type="email"
+              value={str(data, 'agentEmail')}
+              readOnly
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Agent phone</span>
+            <input
+              className="input-filled-locked"
+              type="tel"
+              value={str(data, 'agentPhone')}
+              readOnly
+            />
+          </label>
+        </fieldset>
+      ) : null}
 
       <fieldset className="form-section">
-        <legend>2. Unit & agreement</legend>
+        <legend>{landlordLed ? '1. Unit & agreement' : '2. Unit & agreement'}</legend>
         <UnitSelectField data={data} onChange={onChange} />
         <label className="field">
           <span className="field-label">Move-in / start date</span>
@@ -472,26 +641,7 @@ export function InquiryForm({ data, onChange }: FormProps) {
             disabled={!termEndEditable}
             className={!termEndEditable ? 'input-filled-locked' : undefined}
             aria-readonly={!termEndEditable}
-            title={
-              termEndEditable
-                ? 'Select the custom term end date'
-                : fixedTermMonths
-                  ? 'Locked — calculated from move-in date and agreement term'
-                  : 'Select 12 Months, 24 Months, or Other first'
-            }
           />
-          {fixedTermMonths ? (
-            <span className="field-hint">
-              Auto-filled from move-in date + {fixedTermMonths} months and locked.
-              {!moveInDate ? ' Set a move-in date to calculate it.' : ''}
-            </span>
-          ) : termEndEditable ? (
-            <span className="field-hint">Enter the custom term end date.</span>
-          ) : (
-            <span className="field-hint">
-              Choose an agreement term to set or unlock the end date.
-            </span>
-          )}
         </label>
         <label className="field">
           <span className="field-label">Application type</span>
@@ -516,7 +666,7 @@ export function InquiryForm({ data, onChange }: FormProps) {
       </fieldset>
 
       <fieldset className="form-section">
-        <legend>3. Applicant contact details</legend>
+        <legend>{landlordLed ? '2. Applicant contact details' : '3. Applicant contact details'}</legend>
         <label className="field">
           <span className="field-label">Full name</span>
           <input
@@ -541,31 +691,56 @@ export function InquiryForm({ data, onChange }: FormProps) {
             type="tel"
             value={str(data, 'applicantPhone')}
             onChange={(e) => onChange('applicantPhone', e.target.value)}
-            placeholder="+1 (555) 010-2000"
+            placeholder="+27 82 000 0000"
           />
-        </label>
-        <label className="field">
-          <span className="field-label">Preferred contact method</span>
-          <select
-            value={str(data, 'preferredContact')}
-            onChange={(e) => onChange('preferredContact', e.target.value)}
-          >
-            <option value="">Select…</option>
-            <option value="email">Email</option>
-            <option value="phone">Phone</option>
-            <option value="whatsapp">WhatsApp</option>
-          </select>
         </label>
         <label className="field">
           <span className="field-label">Number of applicants / occupants</span>
-          <input
-            type="number"
-            min={1}
-            value={str(data, 'occupantCount')}
+          <select
+            value={str(data, 'occupantCount') === '2' ? '2' : '1'}
             onChange={(e) => onChange('occupantCount', e.target.value)}
-            placeholder="1"
-          />
+          >
+            <option value="1">1</option>
+            <option value="2">2</option>
+          </select>
         </label>
+        {occupantCount >= 2 ? (
+          <>
+            <p className="field-hint field-span">
+              Second applicant details (required when there are 2 applicants).
+            </p>
+            <label className="field">
+              <span className="field-label">Second applicant — full name</span>
+              <input
+                type="text"
+                value={str(data, 'applicant2Name')}
+                onChange={(e) => onChange('applicant2Name', e.target.value)}
+                placeholder="Full name"
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Second applicant — email</span>
+              <input
+                type="email"
+                value={str(data, 'applicant2Email')}
+                onChange={(e) => onChange('applicant2Email', e.target.value)}
+                placeholder="email@example.com"
+                required
+              />
+            </label>
+            <label className="field">
+              <span className="field-label">Second applicant — phone</span>
+              <input
+                type="tel"
+                value={str(data, 'applicant2Phone')}
+                onChange={(e) => onChange('applicant2Phone', e.target.value)}
+                placeholder="+27 82 000 0000"
+                required
+              />
+            </label>
+          </>
+        ) : null}
       </fieldset>
     </div>
   )
@@ -795,18 +970,120 @@ export function DocumentsForm({ data, onChange }: FormProps) {
   )
 }
 
-export function KycForm({ data, onChange }: FormProps) {
+function num(data: Record<string, unknown>, key: string) {
+  const n = Number(str(data, key))
+  return Number.isFinite(n) ? n : 0
+}
+
+function totalIncome(data: Record<string, unknown>) {
+  return num(data, 'grossSalary') + num(data, 'otherIncome')
+}
+
+function totalExpenses(data: Record<string, unknown>) {
+  return (
+    num(data, 'expenseRentBond') +
+    num(data, 'expenseCar') +
+    num(data, 'expensePhone') +
+    num(data, 'expenseCredit') +
+    num(data, 'expenseOtherLoans') +
+    num(data, 'expenseOther')
+  )
+}
+
+export function KycForm({ data, onChange, viewerRole }: FormProps) {
   const applicant = str(data, 'applicantName') || 'the applicant'
+  const landlordLed = isLandlordInitiated(data)
+  const income = totalIncome(data)
+  const expenses = totalExpenses(data)
+  const rent = num(data, 'apartmentAmount')
+  const expenseRatio = income > 0 ? expenses / income : 0
+  const rentRatio = income > 0 ? rent / income : 0
+  const expenseHighRisk = income > 0 && expenseRatio > 0.8
+  const rentHighRisk = income > 0 && rentRatio > 0.3
+  const canDecide =
+    !viewerRole ||
+    viewerRole === 'landlord' ||
+    viewerRole === 'tenant' ||
+    (!landlordLed && (viewerRole === 'admin' || viewerRole === 'agent'))
 
   return (
     <div className="form-grid">
       <div className="kyc-report-banner">
         <p className="kyc-report-title">KYC report for {applicant}</p>
         <p className="kyc-report-sub">
-          Identity and credit results for this application. Agent and landlord must
-          both approve to continue.
+          {landlordLed
+            ? 'Review income risk, then approve or reject before continuing with identity and credit checks.'
+            : 'Identity and credit results for this application. Agent approval is required to continue.'}
         </p>
       </div>
+
+      <fieldset className="form-section">
+        <legend>Income &amp; expenses outcome</legend>
+        <p className="section-lead field-span">
+          Summary from the applicant&apos;s salary and expenses (stage 2).
+        </p>
+        <div className="field field-span risk-summary-grid">
+          <div className="risk-card">
+            <strong>Expenses vs income</strong>
+            <p>
+              Monthly expenses {formatMoney(expenses)} · Total income{' '}
+              {formatMoney(income)}
+              {income > 0 ? ` (${Math.round(expenseRatio * 100)}%)` : ''}
+            </p>
+            <p className={expenseHighRisk ? 'risk-high' : 'risk-low'}>
+              {income <= 0
+                ? 'Income not provided yet — risk cannot be assessed.'
+                : expenseHighRisk
+                  ? 'High risk — expenses are above 80% of total income.'
+                  : 'Low risk — expenses are within 80% of total income.'}
+            </p>
+          </div>
+          <div className="risk-card">
+            <strong>Rent vs income</strong>
+            <p>
+              Monthly rent {formatMoney(rent)} · Total income {formatMoney(income)}
+              {income > 0 ? ` (${Math.round(rentRatio * 100)}%)` : ''}
+            </p>
+            <p className={rentHighRisk ? 'risk-high' : 'risk-low'}>
+              {income <= 0
+                ? 'Income not provided yet — risk cannot be assessed.'
+                : rentHighRisk
+                  ? 'High risk — rent is over 30% of total income.'
+                  : 'Low risk — rent is within 30% of total income.'}
+            </p>
+          </div>
+        </div>
+        {canDecide ? (
+          <div className="field field-span kyc-decision-row">
+            <button
+              type="button"
+              className={`btn btn-compact${bool(data, 'kycAffordabilityApproved') ? ' btn-primary' : ' btn-ghost'}`}
+              onClick={() => {
+                onChange('kycAffordabilityApproved', true)
+                onChange('kycAffordabilityRejected', false)
+              }}
+            >
+              Approve application
+            </button>
+            <button
+              type="button"
+              className={`btn btn-compact${bool(data, 'kycAffordabilityRejected') ? ' btn-primary' : ' btn-ghost'}`}
+              onClick={() => {
+                onChange('kycAffordabilityRejected', true)
+                onChange('kycAffordabilityApproved', false)
+              }}
+            >
+              Reject application
+            </button>
+            {bool(data, 'kycAffordabilityApproved') ? (
+              <span className="field-hint risk-low">Approved — continue with KYC &amp; credit check.</span>
+            ) : null}
+            {bool(data, 'kycAffordabilityRejected') ? (
+              <span className="field-hint risk-high">Rejected — this application should not proceed.</span>
+            ) : null}
+          </div>
+        ) : null}
+      </fieldset>
 
       <fieldset className="form-section">
         <legend>Identity verification</legend>
@@ -892,33 +1169,64 @@ export function KycForm({ data, onChange }: FormProps) {
             placeholder="Summary of identity and credit findings…"
           />
         </label>
-        <FileField
-          id="kycReportFile"
-          label="Attach KYC / credit report"
-          accept=".pdf,image/*"
-          files={fileNames(data, 'kycReportFile')}
-          uploading={bool(data, 'kycReportFileUploading')}
-          onChange={makeMultiFileHandler(data, onChange, 'kycReportFile', 'kycReportFile')}
-        />
+        <div className="field field-span">
+          <button
+            type="button"
+            className="btn btn-ghost btn-compact"
+            onClick={() => {
+              window.alert('Full KYC and credit report download will be available soon.')
+            }}
+          >
+            Download full KYC &amp; credit check report
+          </button>
+        </div>
       </fieldset>
 
       <fieldset className="form-section">
         <legend>Approvals</legend>
-        <p className="field-hint">Agent approval is required to continue.</p>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            required
-            checked={bool(data, 'agentKycApproved')}
-            onChange={(e) => onChange('agentKycApproved', e.target.checked)}
-          />
-          <span>
-            Agent approves this KYC report and recommends proceeding{' '}
-            <span className="required-marker" aria-hidden="true">
-              *
-            </span>
-          </span>
-        </label>
+        {landlordLed ? (
+          <>
+            <p className="field-hint field-span">
+              Landlord or tenant must approve affordability above before continuing.
+            </p>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={bool(data, 'landlordKycApproved')}
+                onChange={(e) => onChange('landlordKycApproved', e.target.checked)}
+                disabled={viewerRole === 'tenant'}
+              />
+              <span>Landlord approves this KYC report and recommends proceeding</span>
+            </label>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                checked={bool(data, 'tenantKycApproved')}
+                onChange={(e) => onChange('tenantKycApproved', e.target.checked)}
+                disabled={viewerRole === 'landlord'}
+              />
+              <span>Tenant acknowledges the KYC / credit outcome</span>
+            </label>
+          </>
+        ) : (
+          <>
+            <p className="field-hint">Agent approval is required to continue.</p>
+            <label className="check-field">
+              <input
+                type="checkbox"
+                required
+                checked={bool(data, 'agentKycApproved')}
+                onChange={(e) => onChange('agentKycApproved', e.target.checked)}
+              />
+              <span>
+                Agent approves this KYC report and recommends proceeding{' '}
+                <span className="required-marker" aria-hidden="true">
+                  *
+                </span>
+              </span>
+            </label>
+          </>
+        )}
       </fieldset>
     </div>
   )
@@ -1485,22 +1793,43 @@ const INSPECTION_ITEMS = [
 ]
 
 export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
-  const canAgent = !viewerRole || viewerRole === 'admin' || viewerRole === 'agent'
+  const landlordLed = isLandlordInitiated(data)
+  const canFillChecklist =
+    !viewerRole ||
+    (landlordLed
+      ? viewerRole === 'landlord' || viewerRole === 'admin'
+      : viewerRole === 'admin' || viewerRole === 'agent')
   const canTenant = !viewerRole || viewerRole === 'tenant'
+  const canLandlordAck = !viewerRole || viewerRole === 'landlord'
+  const canAgentAck =
+    !landlordLed && (!viewerRole || viewerRole === 'admin' || viewerRole === 'agent')
   const statuses = moveInSignStatuses(data)
+  const customItems = Array.isArray(data.customInspectionItems)
+    ? (data.customInspectionItems as Array<{ id: string; label: string }>)
+    : []
+
+  function setCustomItems(next: Array<{ id: string; label: string }>) {
+    onChange('customInspectionItems', next)
+  }
+
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
-        <strong>Move-in inspection — agent and tenant.</strong>
+        <strong>
+          {landlordLed
+            ? 'Move-in inspection — landlord and tenant.'
+            : 'Move-in inspection — agent and tenant.'}
+        </strong>
         <span>
-          The agent completes the inspection form. The tenant only acknowledges the recorded
-          condition. Only the agent clicks Next, which opens the success page for everyone.
+          {landlordLed
+            ? 'The landlord completes the inspection form. The tenant and landlord both acknowledge the recorded condition. The landlord clicks Next to open the success page.'
+            : 'The agent completes the inspection form. The tenant only acknowledges the recorded condition. Only the agent clicks Next, which opens the success page for everyone.'}
         </span>
       </div>
 
       <PartySignStatusBoard statuses={statuses} />
 
-      <fieldset className="form-section" disabled={!canAgent}>
+      <fieldset className="form-section" disabled={!canFillChecklist}>
         <legend>Inspection details</legend>
         <label className="field">
           <span className="field-label">Inspection date</span>
@@ -1511,12 +1840,23 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
           />
         </label>
         <label className="field">
-          <span className="field-label">Inspecting agent</span>
+          <span className="field-label">
+            {landlordLed ? 'Inspecting landlord' : 'Inspecting agent'}
+          </span>
           <input
             type="text"
-            value={str(data, 'inspectionAgent') || str(data, 'agentName')}
-            onChange={(e) => onChange('inspectionAgent', e.target.value)}
-            placeholder="Agent name"
+            value={
+              landlordLed
+                ? str(data, 'inspectionLandlord') || str(data, 'landlordName')
+                : str(data, 'inspectionAgent') || str(data, 'agentName')
+            }
+            onChange={(e) =>
+              onChange(
+                landlordLed ? 'inspectionLandlord' : 'inspectionAgent',
+                e.target.value,
+              )
+            }
+            placeholder={landlordLed ? 'Landlord name' : 'Agent name'}
           />
         </label>
         <label className="field">
@@ -1548,18 +1888,9 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
             placeholder="Reading"
           />
         </label>
-        <label className="field">
-          <span className="field-label">Meter reading — gas</span>
-          <input
-            type="text"
-            value={str(data, 'meterGas')}
-            onChange={(e) => onChange('meterGas', e.target.value)}
-            placeholder="Reading / N/A"
-          />
-        </label>
       </fieldset>
 
-      <fieldset className="form-section inspection-section" disabled={!canAgent}>
+      <fieldset className="form-section inspection-section" disabled={!canFillChecklist}>
         <legend>Apartment condition checklist</legend>
         <p className="section-lead">
           Rate each item and note any defects. This record is the move-in baseline.
@@ -1572,49 +1903,73 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
               label={item.label}
               data={data}
               onChange={onChange}
+              canEdit={canFillChecklist}
+            />
+          ))}
+          {customItems.map((item, index) => (
+            <InspectionItem
+              key={item.id}
+              id={item.id}
+              label={item.label}
+              data={data}
+              onChange={onChange}
+              canEdit={canFillChecklist}
+              onLabelChange={(value) => {
+                const next = customItems.map((row, i) =>
+                  i === index ? { ...row, label: value } : row,
+                )
+                setCustomItems(next)
+              }}
             />
           ))}
         </div>
+        {canFillChecklist ? (
+          <button
+            type="button"
+            className="btn btn-ghost btn-compact"
+            onClick={() => {
+              setCustomItems([
+                ...customItems,
+                { id: `inspCustom${Date.now()}`, label: '' },
+              ])
+            }}
+          >
+            Add other
+          </button>
+        ) : null}
       </fieldset>
 
       <fieldset className="form-section">
-        <legend>Photos &amp; sign-off</legend>
-        <FileField
-          id="inspectionPhotos"
-          label="Move-in photos"
-          hint="Upload photos of rooms and any defects"
-          accept="image/*,.pdf"
-          files={fileNames(data, 'inspectionPhotos')}
-          uploading={bool(data, 'inspectionPhotosUploading')}
-          onChange={
-            canAgent
-              ? makeMultiFileHandler(
-                  data,
-                  onChange,
-                  'inspectionPhotos',
-                  'inspectionPhotos',
-                )
-              : () => undefined
-          }
-        />
+        <legend>Sign-off</legend>
         <label className="field field-span">
           <span className="field-label">General comments</span>
           <textarea
             rows={4}
             value={str(data, 'inspectionNotes')}
-            onChange={(e) => canAgent && onChange('inspectionNotes', e.target.value)}
-            readOnly={!canAgent}
+            onChange={(e) => canFillChecklist && onChange('inspectionNotes', e.target.value)}
+            readOnly={!canFillChecklist}
             placeholder="Overall condition summary, outstanding issues, keys handed over…"
           />
         </label>
+        {canAgentAck ? (
+          <label className="check-field">
+            <input
+              type="checkbox"
+              disabled={!canAgentAck}
+              checked={bool(data, 'inspectionAgentSigned')}
+              onChange={(e) => onChange('inspectionAgentSigned', e.target.checked)}
+            />
+            <span>Agent confirms this move-in inspection is accurate</span>
+          </label>
+        ) : null}
         <label className="check-field">
           <input
             type="checkbox"
-            disabled={!canAgent}
-            checked={bool(data, 'inspectionAgentSigned')}
-            onChange={(e) => onChange('inspectionAgentSigned', e.target.checked)}
+            disabled={!canLandlordAck}
+            checked={bool(data, 'inspectionLandlordSigned')}
+            onChange={(e) => onChange('inspectionLandlordSigned', e.target.checked)}
           />
-          <span>Agent confirms this move-in inspection is accurate</span>
+          <span>Landlord acknowledges the move-in inspection</span>
         </label>
         <label className="check-field">
           <input
@@ -1625,10 +1980,12 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
           />
           <span>Tenant acknowledges the recorded condition of the apartment</span>
         </label>
-        {canTenant && !canAgent ? (
+        {canTenant && !canFillChecklist ? (
           <span className="field-hint">
-            Check the box above to acknowledge. Only the agent can click Next to finish
-            this application.
+            Check the box above to acknowledge.{' '}
+            {landlordLed
+              ? 'Only the landlord can click Next to finish this application.'
+              : 'Only the agent can click Next to finish this application.'}
           </span>
         ) : null}
       </fieldset>

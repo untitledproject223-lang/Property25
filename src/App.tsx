@@ -15,6 +15,7 @@ import UnitDetailPage from './pages/UnitDetailPage'
 import ApplicationPage from './pages/ApplicationPage'
 import LoginPage from './pages/LoginPage'
 import InvitePage from './pages/InvitePage'
+import UnitAgentInvitePage from './pages/UnitAgentInvitePage'
 import TenantHomePage from './pages/tenant/TenantHomePage'
 import TenantApplicationsPage from './pages/tenant/TenantApplicationsPage'
 import TenantStaysPage from './pages/tenant/TenantStaysPage'
@@ -86,10 +87,12 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/invite/:token" element={<InvitePage />} />
+          <Route path="/unit-invite/:token" element={<UnitAgentInvitePage />} />
 
           <Route element={<Protected />}>
             <Route path="apply" element={<ApplicationPage />} />
             <Route path="apply/:id" element={<ApplicationPage />} />
+            <Route path="unit-invite/:token" element={<UnitAgentInvitePage />} />
 
             <Route element={<AgentOnly />}>
               <Route

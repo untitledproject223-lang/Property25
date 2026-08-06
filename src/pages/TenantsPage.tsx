@@ -1,13 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import TerminateLeaseModal from '../components/TerminateLeaseModal'
+import { terminateLease } from '../data/api'
 import { useDashboard } from '../data/DashboardContext'
 import { ContactActions } from '../dashboard/ContactActions'
 import { TenantDocsActions } from '../dashboard/TenantDocsActions'
 import { formatDate, formatMoney, paymentBadge } from '../data/utils'
 
 export default function TenantsPage() {
-  const { state } = useDashboard()
+  const { state, refresh } = useDashboard()
   const [query, setQuery] = useState('')
+  const [terminatingId, setTerminatingId] = useState<string | null>(null)
+  const [terminateBusy, setTerminateBusy] = useState(false)
+  const [terminateError, setTerminateError] = useState<string | null>(null)
 
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -35,6 +40,8 @@ export default function TenantsPage() {
         )
       })
   }, [state, query])
+
+  const terminating = rows.find((r) => r.tenant.id === terminatingId) ?? null
 
   return (
     <div>
@@ -69,6 +76,7 @@ export default function TenantsPage() {
                 <th>Issues</th>
                 <th>Contact</th>
                 <th>Documents</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -80,6 +88,12 @@ export default function TenantsPage() {
                     </Link>
                     <div style={{ fontSize: '0.8rem', color: 'var(--ink-muted)' }}>
                       <span className={`badge tone-${badge.tone}`}>{badge.label}</span>
+                      {tenant.status === 'former' ? (
+                        <>
+                          {' '}
+                          <span className="badge">Terminated</span>
+                        </>
+                      ) : null}
                     </div>
                   </td>
                   <td>
@@ -107,6 +121,22 @@ export default function TenantsPage() {
                   <td>
                     <TenantDocsActions tenantId={tenant.id} />
                   </td>
+                  <td>
+                    {tenant.status === 'active' || tenant.status === 'notice' ? (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={() => {
+                          setTerminateError(null)
+                          setTerminatingId(tenant.id)
+                        }}
+                      >
+                        Terminate lease
+                      </button>
+                    ) : (
+                      '—'
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -116,6 +146,35 @@ export default function TenantsPage() {
           ) : null}
         </div>
       </div>
+
+      {terminating ? (
+        <TerminateLeaseModal
+          tenantName={terminating.tenant.name}
+          unitLabel={`${terminating.building.name} Unit ${terminating.apartment.unitNumber}`}
+          busy={terminateBusy}
+          error={terminateError}
+          onCancel={() => {
+            if (terminateBusy) return
+            setTerminatingId(null)
+            setTerminateError(null)
+          }}
+          onConfirm={async (payload) => {
+            setTerminateBusy(true)
+            setTerminateError(null)
+            try {
+              await terminateLease(terminating.tenant.id, payload)
+              setTerminatingId(null)
+              await refresh()
+            } catch (e) {
+              setTerminateError(
+                e instanceof Error ? e.message : 'Could not terminate lease',
+              )
+            } finally {
+              setTerminateBusy(false)
+            }
+          }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, Navigate, useParams } from 'react-router-dom'
 import { useAuth } from '../data/AuthContext'
 import { fetchInvite } from '../data/api'
@@ -12,19 +12,31 @@ export default function InvitePage() {
     email: string
     role: string
     orgName: string
+    fullName?: string | null
   } | null>(null)
   const [fullName, setFullName] = useState('')
   const [password, setPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [loadingInvite, setLoadingInvite] = useState(true)
+
+  const passwordsMatch =
+    password.length >= 6 && confirmPassword.length >= 6 && password === confirmPassword
+
+  const canSubmit = useMemo(() => {
+    return Boolean(invite && fullName.trim() && passwordsMatch && !submitting)
+  }, [invite, fullName, passwordsMatch, submitting])
 
   useEffect(() => {
     let cancelled = false
     async function load() {
       try {
         const result = await fetchInvite(token)
-        if (!cancelled) setInvite(result.data)
+        if (!cancelled) {
+          setInvite(result.data)
+          if (result.data.fullName) setFullName(result.data.fullName)
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Invalid invite')
@@ -43,6 +55,7 @@ export default function InvitePage() {
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault()
+    if (!canSubmit) return
     setSubmitting(true)
     setError(null)
     try {
@@ -74,12 +87,7 @@ export default function InvitePage() {
           <>
             <label>
               Full name
-              <input
-                type="text"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-                required
-              />
+              <input type="text" value={fullName} readOnly required />
             </label>
             <label>
               Password
@@ -89,15 +97,38 @@ export default function InvitePage() {
                 onChange={(e) => setPassword(e.target.value)}
                 minLength={6}
                 required
+                autoComplete="new-password"
               />
             </label>
+            <label>
+              Confirm password
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                minLength={6}
+                required
+                autoComplete="new-password"
+              />
+            </label>
+            {confirmPassword.length > 0 ? (
+              <p
+                className="login-sub"
+                style={{
+                  margin: 0,
+                  color: passwordsMatch ? '#8fd4a8' : '#f0b4b0',
+                }}
+              >
+                {passwordsMatch ? 'Password matches' : 'Passwords do not match'}
+              </p>
+            ) : null}
           </>
         ) : null}
 
         {error ? <p className="login-error">{error}</p> : null}
 
         {invite ? (
-          <button type="submit" disabled={submitting}>
+          <button type="submit" disabled={!canSubmit}>
             {submitting ? 'Creating account…' : 'Create account & sign in'}
           </button>
         ) : null}

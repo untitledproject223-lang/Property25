@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { sql } from '../db/client.js'
-import { requireAuth } from '../middleware/auth.js'
+import { requireAuth, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 
 export const tenantsRouter = Router()
@@ -181,6 +181,66 @@ tenantsRouter.patch('/:id', async (req, res, next) => {
         balance::float8 AS balance, docs_json AS docs,
         move_in_inspection_json AS "moveInInspection"
     `
+    res.json({ data: rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+const terminateSchema = z.object({
+  reason: z.string().min(1).max(2000),
+  depositPaidOut: z.boolean(),
+  terminationDate: z.string().date(),
+})
+
+/** Agent/admin: terminate a lease and free the unit immediately. */
+tenantsRouter.post('/:id/terminate', requireAgent, async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const body = terminateSchema.parse(req.body)
+
+    const existing = await sql`
+      SELECT id, apartment_id, status
+      FROM tenants
+      WHERE id = ${id} AND org_id = ${req.orgId!}
+      LIMIT 1
+    `
+    if (existing.length === 0) throw new AppError(404, 'Tenant not found')
+    if (String(existing[0].status) === 'former') {
+      throw new AppError(400, 'This lease is already terminated')
+    }
+
+    const apartmentId = String(existing[0].apartment_id)
+
+    const rows = await sql`
+      UPDATE tenants
+      SET
+        status = 'former',
+        lease_end = ${body.terminationDate},
+        termination_reason = ${body.reason.trim()},
+        deposit_paid_out = ${body.depositPaidOut},
+        terminated_at = ${body.terminationDate},
+        updated_at = now()
+      WHERE id = ${id} AND org_id = ${req.orgId!}
+      RETURNING id, apartment_id AS "apartmentId", name, email, phone, status,
+        lease_start AS "leaseStart", lease_end AS "leaseEnd",
+        termination_reason AS "terminationReason",
+        deposit_paid_out AS "depositPaidOut",
+        terminated_at AS "terminatedAt"
+    `
+
+    await sql`
+      UPDATE apartments
+      SET
+        status = 'vacant',
+        deposit_balance = CASE
+          WHEN ${body.depositPaidOut} THEN 0
+          ELSE deposit_balance
+        END,
+        updated_at = now()
+      WHERE id = ${apartmentId} AND org_id = ${req.orgId!}
+    `
+
     res.json({ data: rows[0] })
   } catch (err) {
     next(err)

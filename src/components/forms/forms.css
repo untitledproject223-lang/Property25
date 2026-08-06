@@ -349,8 +349,8 @@
 
 .inspection-item {
   display: grid;
-  grid-template-columns: minmax(10rem, 1.4fr) minmax(8rem, 0.8fr) minmax(10rem, 1.2fr);
-  gap: 0.65rem;
+  grid-template-columns: minmax(9rem, 1.3fr) minmax(7rem, 0.75fr) minmax(8rem, 1.1fr) auto;
+  gap: 0.5rem;
   align-items: center;
   padding: 0.55rem 0.65rem;
   border-radius: 8px;
@@ -363,13 +363,113 @@
   font-weight: 600;
 }
 
+.inspection-item-label-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
 .inspection-item select,
-.inspection-item input {
+.inspection-item input[type='text'] {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
   padding: 0.55rem 0.7rem;
+}
+
+.inspection-item-upload {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #fff;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.inspection-item-upload input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.inspection-item-upload span {
+  font-size: 0.85rem;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.risk-summary-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.risk-card {
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: #f7f9fc;
+}
+
+.risk-card p {
+  margin: 0.35rem 0 0;
+  font-size: 0.9rem;
+  color: var(--ink-muted);
+}
+
+.risk-high {
+  color: #b42318 !important;
+  font-weight: 600;
+}
+
+.risk-low {
+  color: #027a48 !important;
+  font-weight: 600;
+}
+
+.kyc-decision-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.invite-link-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.invite-link-row span {
+  flex: 1;
+  word-break: break-all;
+}
+
+.invite-copy-btn {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  color: var(--ink);
+}
+
+.invite-copy-btn:hover {
+  background: #f0f4f8;
 }
 
 @media (min-width: 900px) {
@@ -388,6 +488,10 @@
   }
 
   .inspection-item {
+    grid-template-columns: 1fr;
+  }
+
+  .risk-summary-grid {
     grid-template-columns: 1fr;
   }
 

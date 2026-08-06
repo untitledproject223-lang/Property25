@@ -166,6 +166,35 @@
   border-color: #a8c0d4;
 }
 
+.invite-link-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.invite-link-row > span {
+  flex: 1;
+}
+
+.invite-copy-btn {
+  flex-shrink: 0;
+  width: 2.25rem;
+  height: 2.25rem;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  cursor: pointer;
+  color: var(--ink);
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.invite-copy-btn:hover {
+  background: #f0f4f8;
+}
+
 .btn-compact {
   border-radius: 8px;
   padding: 0.5rem 0.85rem;

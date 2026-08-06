@@ -164,6 +164,24 @@ export async function createTenant(input: {
   })
 }
 
+export async function terminateLease(
+  tenantId: string,
+  input: {
+    reason: string
+    depositPaidOut: boolean
+    terminationDate: string
+  },
+  options?: { asLandlord?: boolean },
+) {
+  const path = options?.asLandlord
+    ? `/api/portal/landlord/tenants/${tenantId}/terminate`
+    : `/api/tenants/${tenantId}/terminate`
+  return apiRequest<{ data: Record<string, unknown> }>(path, {
+    method: 'POST',
+    body: input,
+  })
+}
+
 export async function createInvoice(input: {
   tenantId: string
   dueDate: string
@@ -375,6 +393,7 @@ export async function fetchInvite(token: string) {
       orgName: string
       applicationId?: string | null
       expiresAt: string
+      fullName?: string | null
     }
   }>(`/api/invites/${token}`, { auth: false })
 }
@@ -457,6 +476,41 @@ export async function setUnitTicketManager(
   return apiRequest<{ data: Record<string, unknown> }>(
     `/api/portal/landlord/units/${unitId}/ticket-manager`,
     { method: 'PATCH', body: { ticketManager } },
+  )
+}
+
+export async function createUnitAgentInvite(unitId: string) {
+  return apiRequest<{
+    data: {
+      inviteUrl: string
+      unitNumber: string
+      buildingName: string
+      expiresAt: string
+    }
+  }>(`/api/portal/landlord/units/${unitId}/agent-invite`, {
+    method: 'POST',
+    body: {},
+  })
+}
+
+export async function fetchUnitAgentInvite(token: string) {
+  return apiRequest<{
+    data: {
+      apartmentId: string
+      unitNumber: string
+      buildingName: string
+      buildingAddress: string
+      landlordName: string
+      orgName: string
+      expiresAt: string
+    }
+  }>(`/api/portal/unit-agent-invites/${token}`)
+}
+
+export async function acceptUnitAgentInvite(token: string) {
+  return apiRequest<{ data: { apartmentId: string; accepted: boolean } }>(
+    `/api/portal/unit-agent-invites/${token}/accept`,
+    { method: 'POST', body: {} },
   )
 }
 

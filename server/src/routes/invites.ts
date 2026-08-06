@@ -5,7 +5,7 @@ import { sql } from '../db/client.js'
 import { signAccessToken } from '../lib/auth.js'
 import { generateInviteToken, hashInviteToken } from '../lib/inviteToken.js'
 import { inviteLink } from '../lib/publicUrl.js'
-import { requireAuth, requireAgent } from '../middleware/auth.js'
+import { requireAuth } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 
 export const invitesRouter = Router()
@@ -18,10 +18,33 @@ const createInviteSchema = z.object({
   landlordId: z.string().uuid().optional().nullable(),
 })
 
-invitesRouter.post('/', requireAuth, requireAgent, async (req, res, next) => {
+invitesRouter.post('/', requireAuth, async (req, res, next) => {
   try {
+    const auth = req.auth!
+    if (auth.role !== 'admin' && auth.role !== 'agent' && auth.role !== 'landlord') {
+      throw new AppError(403, 'Only an agent or landlord can create invites')
+    }
     const body = createInviteSchema.parse(req.body)
     const email = body.email.trim().toLowerCase()
+
+    if (auth.role === 'landlord') {
+      if (body.role !== 'tenant' || !body.applicationId) {
+        throw new AppError(403, 'Landlords can only invite applicants for their applications')
+      }
+      const owned = await sql`
+        SELECT a.id
+        FROM applications a
+        JOIN apartments apt ON apt.id = a.apartment_id
+        JOIN landlords l ON l.id = apt.landlord_id
+        WHERE a.id = ${body.applicationId}
+          AND a.org_id = ${req.orgId!}
+          AND l.user_id = ${auth.sub}
+        LIMIT 1
+      `
+      if (owned.length === 0) {
+        throw new AppError(403, 'Application not found on your units')
+      }
+    }
 
     if (body.applicationId) {
       const apps = await sql`
@@ -81,9 +104,12 @@ invitesRouter.get('/:token', async (req, res, next) => {
     const tokenHash = hashInviteToken(token)
     const rows = await sql`
       SELECT i.id, i.email, i.role, i.expires_at AS "expiresAt", i.accepted_at AS "acceptedAt",
-        i.application_id AS "applicationId", o.name AS "orgName"
+        i.application_id AS "applicationId", o.name AS "orgName",
+        COALESCE(a.applicant_name, l.name) AS "fullName"
       FROM invites i
       JOIN organisations o ON o.id = i.org_id
+      LEFT JOIN applications a ON a.id = i.application_id
+      LEFT JOIN landlords l ON l.id = i.landlord_id
       WHERE i.token_hash = ${tokenHash}
       LIMIT 1
     `
@@ -100,6 +126,7 @@ invitesRouter.get('/:token', async (req, res, next) => {
         orgName: invite.orgName,
         applicationId: invite.applicationId,
         expiresAt: invite.expiresAt,
+        fullName: invite.fullName ?? null,
       },
     })
   } catch (err) {
