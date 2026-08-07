@@ -586,55 +586,33 @@ export default function UnitDetailPage() {
                 </p>
               ) : null}
 
-              <table className="data-table">
+              <table className="data-table invoice-side-table">
                 <thead>
                   <tr>
                     <th>Tenant</th>
-                    <th>Kind</th>
                     <th>Reason</th>
                     <th>Due</th>
                     <th>Total</th>
-                    <th>Status</th>
                     <th />
                   </tr>
                 </thead>
                 <tbody>
-                  {history.invoices.slice(0, 6).map((inv) => {
-                    const kind =
-                      inv.billingKind === 'recurring' || inv.isRecurring
-                        ? 'Recurring'
-                        : 'One-time'
-                    return (
-                      <tr key={asString(inv.id)}>
-                        <td>{tenantNameById.get(asString(inv.tenantId)) ?? '—'}</td>
-                        <td>
-                          <span
-                            className={`badge ${
-                              kind === 'Recurring' ? 'tone-issue' : 'tone-neutral'
-                            }`}
-                          >
-                            {kind}
-                          </span>
-                        </td>
-                        <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
-                        <td>{formatDate(asString(inv.dueDate))}</td>
-                        <td>{formatMoney(asNumber(inv.total))}</td>
-                        <td>
-                          <span className={`badge ${statusTone(asString(inv.status))}`}>
-                            {asString(inv.status)}
-                          </span>
-                        </td>
-                        <td>
-                          <Link
-                            className="btn btn-primary btn-compact"
-                            to={`/invoices/${asString(inv.id)}/view`}
-                          >
-                            View invoice
-                          </Link>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                  {history.invoices.slice(0, 6).map((inv) => (
+                    <tr key={asString(inv.id)}>
+                      <td>{tenantNameById.get(asString(inv.tenantId)) ?? '—'}</td>
+                      <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
+                      <td>{formatDate(asString(inv.dueDate))}</td>
+                      <td>{formatMoney(asNumber(inv.total))}</td>
+                      <td>
+                        <Link
+                          className="btn-invoice-view"
+                          to={`/invoices/${asString(inv.id)}/view`}
+                        >
+                          View
+                        </Link>
+                      </td>
+                    </tr>
+                  ))}
                 </tbody>
               </table>
               {history.invoices.length === 0 ? (
@@ -719,16 +697,14 @@ export default function UnitDetailPage() {
               <h2>Invoices</h2>
             </div>
             <div className="panel-body" style={{ paddingTop: 0 }}>
-              <table className="data-table">
+              <table className="data-table invoice-side-table">
                 <thead>
                   <tr>
                     <th>Tenant</th>
-                    <th>Kind</th>
                     <th>Reason</th>
                     <th>Issued</th>
                     <th>Due</th>
                     <th>Total</th>
-                    <th>Status</th>
                     <th />
                   </tr>
                 </thead>
@@ -736,26 +712,16 @@ export default function UnitDetailPage() {
                   {history.invoices.map((inv) => (
                     <tr key={asString(inv.id)}>
                       <td>{tenantNameById.get(asString(inv.tenantId)) ?? '—'}</td>
-                      <td>
-                        {inv.billingKind === 'recurring' || inv.isRecurring
-                          ? 'Recurring'
-                          : 'One-time'}
-                      </td>
                       <td className="invoice-reason-cell">{invoiceReason(inv)}</td>
                       <td>{formatDate(asString(inv.issuedAt))}</td>
                       <td>{formatDate(asString(inv.dueDate))}</td>
                       <td>{formatMoney(asNumber(inv.total))}</td>
                       <td>
-                        <span className={`badge ${statusTone(asString(inv.status))}`}>
-                          {asString(inv.status)}
-                        </span>
-                      </td>
-                      <td>
                         <Link
-                          className="btn btn-primary btn-compact"
+                          className="btn-invoice-view"
                           to={`/invoices/${asString(inv.id)}/view`}
                         >
-                          View invoice
+                          View
                         </Link>
                       </td>
                     </tr>

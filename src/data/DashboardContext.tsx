@@ -141,6 +141,11 @@ export interface UnitInput {
   landlordId: string
   status?: Apartment['status']
   nextDueDate?: string
+  postalCode?: string | null
+  levies?: number | null
+  municipal?: number | null
+  purchasePrice?: number | null
+  bankOwed?: number | null
 }
 
 export interface BuildingInput {
@@ -426,6 +431,11 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         deposit: input.deposit,
         status: input.status ?? 'vacant',
         nextDueDate: input.nextDueDate ?? null,
+        postalCode: input.postalCode ?? null,
+        levies: input.levies ?? null,
+        municipal: input.municipal ?? null,
+        purchasePrice: input.purchasePrice ?? null,
+        bankOwed: input.bankOwed ?? null,
       })
       await refresh()
       const row = result.data

@@ -1,0 +1,77 @@
+.unit-onboard {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.unit-onboard-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.unit-onboard-steps span {
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 0.8rem;
+  color: var(--ink-muted);
+  background: #f7f9fc;
+}
+
+.unit-onboard-steps span.is-active {
+  color: var(--ink);
+  border-color: #2a5f8a;
+  background: #e8f1f8;
+  font-weight: 600;
+}
+
+.unit-onboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem 1rem;
+}
+
+.unit-onboard-grid label {
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.unit-onboard-grid input,
+.unit-onboard-grid select {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  font: inherit;
+  background: #fff;
+}
+
+.unit-onboard-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  margin-top: 0.25rem;
+}
+
+.unit-onboard-hint,
+.unit-onboard-error {
+  margin: 0;
+  grid-column: 1 / -1;
+  font-size: 0.9rem;
+}
+
+.unit-onboard-hint {
+  color: var(--ink-muted);
+}
+
+.unit-onboard-error {
+  color: #9b2c2c;
+}
+
+@media (max-width: 720px) {
+  .unit-onboard-grid {
+    grid-template-columns: 1fr;
+  }
+}

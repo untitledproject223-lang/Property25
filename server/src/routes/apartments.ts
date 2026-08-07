@@ -34,6 +34,11 @@ const createApartmentSchema = z.object({
   deposit: z.number().nonnegative(),
   status: z.enum(['vacant', 'occupied', 'notice']).default('vacant'),
   nextDueDate: z.string().date().optional().nullable(),
+  postalCode: z.string().max(32).optional().nullable(),
+  levies: z.number().nonnegative().optional().nullable(),
+  municipal: z.number().nonnegative().optional().nullable(),
+  purchasePrice: z.number().nonnegative().optional().nullable(),
+  bankOwed: z.number().nonnegative().optional().nullable(),
 })
 
 apartmentsRouter.post('/', async (req, res, next) => {
@@ -52,13 +57,18 @@ apartmentsRouter.post('/', async (req, res, next) => {
 
     const rows = await sql`
       INSERT INTO apartments (
-        org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status, next_due_date
+        org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status,
+        next_due_date, postal_code, levies, municipal, purchase_price, bank_owed
       )
       VALUES (
         ${req.orgId!}, ${body.buildingId}, ${body.landlordId}, ${body.unitNumber},
-        ${body.rent}, ${body.deposit}, ${body.deposit}, ${body.status}, ${body.nextDueDate ?? null}
+        ${body.rent}, ${body.deposit}, ${body.deposit}, ${body.status}, ${body.nextDueDate ?? null},
+        ${body.postalCode ?? null}, ${body.levies ?? null}, ${body.municipal ?? null},
+        ${body.purchasePrice ?? null}, ${body.bankOwed ?? null}
       )
-      RETURNING id, org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status, next_due_date, created_at, updated_at
+      RETURNING id, org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance,
+        status, next_due_date, postal_code, levies, municipal, purchase_price, bank_owed,
+        created_at, updated_at
     `
     res.status(201).json({ data: rows[0] })
   } catch (err) {

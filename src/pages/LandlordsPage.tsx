@@ -1,47 +1,69 @@
 import { useMemo, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import UnitOnboardingForm, {
+  type UnitOnboardingPayload,
+} from '../components/UnitOnboardingForm'
 import { useDashboard } from '../data/DashboardContext'
-import { ContactActions } from '../dashboard/ContactActions'
 import { createInvite } from '../data/api'
-import { formatDateTime, mailto } from '../data/utils'
+import { formatDate, formatMoney, paymentBadge } from '../data/utils'
+import { isUnitVacant } from '../data/unitHelpers'
 import './TenantDetail.css'
+import './landlord/LandlordUnitsPage.css'
 
 export default function LandlordsPage() {
-  const { state, tenantApartment, logLandlordUpdate, addLandlord } = useDashboard()
+  const navigate = useNavigate()
+  const { state, tenantApartment, addLandlord, addBuilding, addUnit } = useDashboard()
   const [selectedId, setSelectedId] = useState(state.landlords[0]?.id ?? '')
-  const [body, setBody] = useState('')
-  const [tenantId, setTenantId] = useState('')
   const [showAdd, setShowAdd] = useState(false)
+  const [showUnitOnboard, setShowUnitOnboard] = useState(false)
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
-  const [whatsapp, setWhatsapp] = useState('')
   const [error, setError] = useState('')
   const [inviteUrl, setInviteUrl] = useState<string | null>(null)
+  const [unitSaving, setUnitSaving] = useState(false)
+  const [justCreatedLandlordId, setJustCreatedLandlordId] = useState<string | null>(null)
 
   const landlord = state.landlords.find((l) => l.id === selectedId) ?? state.landlords[0]
 
+  const landlordUnits = useMemo(() => {
+    if (!landlord) return []
+    return state.apartments.filter((a) => a.landlordId === landlord.id)
+  }, [state.apartments, landlord])
+
   const relatedTenants = useMemo(() => {
     if (!landlord) return []
-    const apartmentIds = state.apartments
-      .filter((a) => a.landlordId === landlord.id)
-      .map((a) => a.id)
-    return state.tenants.filter((t) => apartmentIds.includes(t.apartmentId))
-  }, [state, landlord])
+    const apartmentIds = new Set(landlordUnits.map((a) => a.id))
+    return state.tenants.filter(
+      (t) =>
+        apartmentIds.has(t.apartmentId) &&
+        (t.status === 'active' || t.status === 'notice'),
+    )
+  }, [state.tenants, landlord, landlordUnits])
 
-  const updates = useMemo(() => {
-    if (!landlord) return []
-    return state.landlordUpdates
-      .filter((u) => u.landlordId === landlord.id)
-      .sort((a, b) => b.at.localeCompare(a.at))
-  }, [state.landlordUpdates, landlord])
+  const vacantCount = landlordUnits.filter((a) => isUnitVacant(a.id, state.tenants)).length
+  const occupiedCount = landlordUnits.length - vacantCount
+  const openTickets = useMemo(() => {
+    const tenantIds = new Set(relatedTenants.map((t) => t.id))
+    return state.issues.filter(
+      (i) =>
+        tenantIds.has(i.tenantId) &&
+        i.status !== 'resolved' &&
+        i.status !== 'rejected',
+    ).length
+  }, [state.issues, relatedTenants])
+  const balancesDue = relatedTenants.filter((t) => t.balance > 0).length
+  const totalRentBook = relatedTenants.reduce((sum, t) => {
+    const apt = state.apartments.find((a) => a.id === t.apartmentId)
+    return sum + (apt?.rent ?? 0)
+  }, 0)
+  const totalArrears = relatedTenants.reduce((sum, t) => sum + Math.max(0, t.balance), 0)
 
   function resetAddForm() {
     setShowAdd(false)
     setName('')
     setEmail('')
     setPhone('')
-    setWhatsapp('')
     setError('')
   }
 
@@ -65,10 +87,9 @@ export default function LandlordsPage() {
         name: name.trim(),
         email: email.trim(),
         phone: phone.trim(),
-        whatsapp: whatsapp.trim() || undefined,
       })
       setSelectedId(created.id)
-      setTenantId('')
+      setJustCreatedLandlordId(created.id)
       try {
         const invite = await createInvite({
           email: email.trim(),
@@ -100,17 +121,40 @@ export default function LandlordsPage() {
     }
   }
 
-  function submitUpdate(e: FormEvent) {
-    e.preventDefault()
-    if (!landlord || !body.trim()) return
-    void logLandlordUpdate({
-      landlordId: landlord.id,
-      tenantId: tenantId || undefined,
-      body: body.trim(),
-      channel: 'email',
-    })
-    window.location.href = mailto(landlord.email, 'Important tenancy update', body.trim())
-    setBody('')
+  async function onUnitSubmit(payload: UnitOnboardingPayload) {
+    const landlordId = payload.landlordId || justCreatedLandlordId || landlord?.id
+    if (!landlordId) {
+      setError('Select a landlord before onboarding a unit.')
+      return
+    }
+    setUnitSaving(true)
+    setError('')
+    try {
+      const building = await addBuilding({
+        name: payload.buildingName,
+        address: payload.buildingAddress,
+      })
+      const created = await addUnit({
+        buildingId: building.id,
+        landlordId,
+        unitNumber: payload.unitNumber,
+        rent: payload.rent,
+        deposit: payload.deposit,
+        postalCode: payload.postalCode,
+        levies: payload.levies,
+        municipal: payload.municipal,
+        purchasePrice: payload.purchasePrice,
+        bankOwed: payload.bankOwed,
+        status: 'vacant',
+      })
+      setShowUnitOnboard(false)
+      setJustCreatedLandlordId(null)
+      navigate(`/units/${created.id}`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not onboard unit')
+    } finally {
+      setUnitSaving(false)
+    }
   }
 
   return (
@@ -118,13 +162,14 @@ export default function LandlordsPage() {
       <div className="page-header">
         <div>
           <h1>Landlords</h1>
-          <p>Contact landlords and log important updates about their units and tenants.</p>
+          <p>Manage landlords, their units, and tenant performance across the book.</p>
         </div>
         <button
           type="button"
           className="btn btn-primary btn-compact"
           onClick={() => {
             setShowAdd(true)
+            setShowUnitOnboard(false)
             setError('')
           }}
         >
@@ -152,7 +197,6 @@ export default function LandlordsPage() {
                 type="text"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="Priya Naidoo"
                 required
               />
             </label>
@@ -162,7 +206,6 @@ export default function LandlordsPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="landlord@example.com"
                 required
               />
             </label>
@@ -176,19 +219,56 @@ export default function LandlordsPage() {
                 required
               />
             </label>
-            <label>
-              WhatsApp (optional)
-              <input
-                type="text"
-                value={whatsapp}
-                onChange={(e) => setWhatsapp(e.target.value)}
-                placeholder="27821234501"
-              />
-            </label>
-            <button type="submit" className="btn btn-primary btn-compact">
-              Save landlord
-            </button>
+            <div className="btn-row">
+              <button type="submit" className="btn btn-primary btn-compact">
+                Save landlord
+              </button>
+            </div>
           </form>
+        </div>
+      ) : null}
+
+      {justCreatedLandlordId && !showUnitOnboard ? (
+        <div className="panel" style={{ marginBottom: '1rem' }}>
+          <div className="panel-body btn-row" style={{ alignItems: 'center' }}>
+            <p className="muted" style={{ margin: 0, flex: 1 }}>
+              Landlord saved. Invite them to the portal, or onboard their first unit now.
+            </p>
+            <button
+              type="button"
+              className="btn btn-primary btn-compact"
+              onClick={() => {
+                setShowUnitOnboard(true)
+                setError('')
+              }}
+            >
+              Onboard a unit
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {showUnitOnboard ? (
+        <div className="panel" style={{ marginBottom: '1rem' }}>
+          <div className="panel-header">
+            <h2>Onboard a unit</h2>
+            <button
+              type="button"
+              className="btn btn-ghost btn-compact"
+              onClick={() => setShowUnitOnboard(false)}
+            >
+              Cancel
+            </button>
+          </div>
+          <div className="panel-body">
+            <UnitOnboardingForm
+              lockedLandlordId={justCreatedLandlordId || landlord?.id}
+              submitting={unitSaving}
+              error={error}
+              onCancel={() => setShowUnitOnboard(false)}
+              onSubmit={onUnitSubmit}
+            />
+          </div>
         </div>
       ) : null}
 
@@ -198,7 +278,7 @@ export default function LandlordsPage() {
             No landlords on file yet. Click <strong>Add landlord</strong> to create one.
           </div>
         </div>
-      ) : (
+      ) : !showUnitOnboard ? (
         <div className="detail-grid">
           <div className="panel">
             <div className="panel-header">
@@ -210,10 +290,7 @@ export default function LandlordsPage() {
                   key={l.id}
                   type="button"
                   className={`issue-item${landlord.id === l.id ? ' active' : ''}`}
-                  onClick={() => {
-                    setSelectedId(l.id)
-                    setTenantId('')
-                  }}
+                  onClick={() => setSelectedId(l.id)}
                 >
                   <div>
                     <strong>{l.name}</strong>
@@ -227,14 +304,62 @@ export default function LandlordsPage() {
           <div className="panel">
             <div className="panel-header">
               <h2>{landlord.name}</h2>
+              <button
+                type="button"
+                className="btn btn-ghost btn-compact"
+                onClick={() => {
+                  setJustCreatedLandlordId(landlord.id)
+                  setShowUnitOnboard(true)
+                  setError('')
+                }}
+              >
+                Onboard a unit
+              </button>
             </div>
             <div className="panel-body">
-              <ContactActions
-                person={landlord}
-                landlordId={landlord.id}
-                subject="Important tenancy update"
-              />
-              <div style={{ marginTop: '0.75rem' }}>
+              <div className="stat-grid stat-grid-4" style={{ marginBottom: '1rem' }}>
+                <div className="stat-card">
+                  <div className="label">Units</div>
+                  <div className="value">{landlordUnits.length}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="label">Tenants</div>
+                  <div className="value">{relatedTenants.length}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="label">Vacant</div>
+                  <div className="value">{vacantCount}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="label">Occupied</div>
+                  <div className="value">{occupiedCount}</div>
+                </div>
+              </div>
+
+              <div className="stat-grid stat-grid-4" style={{ marginBottom: '1.25rem' }}>
+                <div className="stat-card">
+                  <div className="label">Open tickets</div>
+                  <div className="value">{openTickets}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="label">Balances due</div>
+                  <div className="value">{balancesDue}</div>
+                </div>
+                <div className="stat-card">
+                  <div className="label">Rent book</div>
+                  <div className="value" style={{ fontSize: '1.15rem' }}>
+                    {formatMoney(totalRentBook)}
+                  </div>
+                </div>
+                <div className="stat-card">
+                  <div className="label">Arrears</div>
+                  <div className="value" style={{ fontSize: '1.15rem' }}>
+                    {formatMoney(totalArrears)}
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '1rem' }}>
                 <button
                   type="button"
                   className="btn btn-ghost btn-compact"
@@ -254,76 +379,55 @@ export default function LandlordsPage() {
                 ) : null}
               </div>
 
-              <h3 style={{ margin: '1.25rem 0 0.65rem', fontSize: '1.05rem' }}>
-                Related tenants
-              </h3>
-              <ul className="timeline-list">
-                {relatedTenants.map((t) => {
-                  const ctx = tenantApartment(t.id)
-                  return (
-                    <li key={t.id}>
-                      <Link className="link-quiet" to={`/tenants/${t.id}`}>
-                        {t.name}
-                      </Link>
-                      <div className="muted">
-                        {ctx?.building.name} Unit {ctx?.apartment.unitNumber}
-                      </div>
-                    </li>
-                  )
-                })}
+              <h3 style={{ margin: '0 0 0.65rem', fontSize: '1.05rem' }}>Related tenants</h3>
+              <div className="table-wrap">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Tenant</th>
+                      <th>Unit</th>
+                      <th>Lease end</th>
+                      <th>Balance</th>
+                      <th>Payment status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {relatedTenants.map((t) => {
+                      const ctx = tenantApartment(t.id)
+                      const badge = paymentBadge(
+                        t.balance,
+                        ctx?.apartment.nextDueDate,
+                      )
+                      return (
+                        <tr key={t.id}>
+                          <td>
+                            <Link className="link-quiet" to={`/tenants/${t.id}`}>
+                              <strong>{t.name}</strong>
+                            </Link>
+                          </td>
+                          <td>
+                            {ctx
+                              ? `${ctx.building.name} · Unit ${ctx.apartment.unitNumber}`
+                              : '—'}
+                          </td>
+                          <td>{formatDate(t.leaseEnd)}</td>
+                          <td>{formatMoney(t.balance)}</td>
+                          <td>
+                            <span className={`badge tone-${badge.tone}`}>{badge.label}</span>
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
                 {relatedTenants.length === 0 ? (
-                  <li className="muted">No active tenants for this landlord.</li>
+                  <div className="empty-state">No active tenants for this landlord.</div>
                 ) : null}
-              </ul>
-
-              <form
-                className="form-stack"
-                style={{ marginTop: '1.25rem' }}
-                onSubmit={submitUpdate}
-              >
-                <label>
-                  Related tenant (optional)
-                  <select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
-                    <option value="">General update</option>
-                    {relatedTenants.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  Update message
-                  <textarea
-                    rows={4}
-                    value={body}
-                    onChange={(e) => setBody(e.target.value)}
-                    required
-                    placeholder="What does the landlord need to know?"
-                  />
-                </label>
-                <button type="submit" className="btn btn-primary btn-compact">
-                  Log & email update
-                </button>
-              </form>
-
-              <h3 style={{ margin: '1.5rem 0 0.65rem', fontSize: '1.05rem' }}>Update log</h3>
-              {updates.length === 0 ? (
-                <div className="empty-state">No updates logged yet.</div>
-              ) : (
-                <ul className="timeline-list">
-                  {updates.map((u) => (
-                    <li key={u.id}>
-                      <strong>{u.channel}</strong> · {formatDateTime(u.at)}
-                      <div>{u.body}</div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+              </div>
             </div>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

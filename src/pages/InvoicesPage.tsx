@@ -29,7 +29,6 @@ export default function InvoicesPage() {
   const [maintenanceAmount, setMaintenanceAmount] = useState('')
   const [oneTimeAmount, setOneTimeAmount] = useState('')
   const [oneTimeDescription, setOneTimeDescription] = useState('')
-  const [notes, setNotes] = useState('')
   const [formError, setFormError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -64,7 +63,6 @@ export default function InvoicesPage() {
     setIncludeAdmin(false)
     setIncludeMaintenance(true)
     setMaintenanceAmount(String(tenantMaintenanceAmount(decision) || ''))
-    setNotes(`Linked to ticket: ${ticket.subject}`)
   }
 
   async function submit(e: FormEvent) {
@@ -129,13 +127,11 @@ export default function InvoicesPage() {
         tenantId: composeCtx.tenant.id,
         dueDate,
         items,
-        notes: notes || undefined,
         status: 'sent',
         billingKind: issueId ? 'one_time' : billingKind,
         isRecurring: !issueId && billingKind === 'recurring',
         issueId: issueId || undefined,
       })
-      setNotes('')
       setIssueId('')
       setIncludeMaintenance(false)
       setMaintenanceAmount('')
@@ -323,15 +319,6 @@ export default function InvoicesPage() {
               </label>
             </div>
           )}
-
-          <label className="invoice-field invoice-notes-field">
-            <span>Reason</span>
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Why this invoice is being issued…"
-            />
-          </label>
 
           <div className="invoice-compose-actions">
             {formError ? <p className="login-error">{formError}</p> : null}

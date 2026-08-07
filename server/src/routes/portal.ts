@@ -309,6 +309,11 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         a.status,
         a.ticket_manager AS "ticketManager",
         a.managing_agent_id AS "managingAgentId",
+        a.postal_code AS "postalCode",
+        a.levies::float8 AS levies,
+        a.municipal::float8 AS municipal,
+        a.purchase_price::float8 AS "purchasePrice",
+        a.bank_owed::float8 AS "bankOwed",
         ma.full_name AS "managingAgentName",
         ma.email AS "managingAgentEmail",
         b.name AS "buildingName",
@@ -418,10 +423,15 @@ portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => 
       .object({
         buildingId: z.string().uuid().optional(),
         newBuildingName: z.string().min(1).max(160).optional(),
-        newBuildingAddress: z.string().max(240).optional(),
+        newBuildingAddress: z.string().max(300).optional(),
         unitNumber: z.string().min(1).max(40),
         rent: z.number().positive(),
         deposit: z.number().nonnegative(),
+        postalCode: z.string().max(32).optional().nullable(),
+        levies: z.number().nonnegative().optional().nullable(),
+        municipal: z.number().nonnegative().optional().nullable(),
+        purchasePrice: z.number().nonnegative().optional().nullable(),
+        bankOwed: z.number().nonnegative().optional().nullable(),
       })
       .parse(req.body)
 
@@ -455,11 +465,14 @@ portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => 
 
     const rows = await sql`
       INSERT INTO apartments (
-        org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status
+        org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status,
+        postal_code, levies, municipal, purchase_price, bank_owed
       )
       VALUES (
         ${req.orgId!}, ${buildingId}, ${landlordId}, ${body.unitNumber.trim()},
-        ${body.rent}, ${body.deposit}, ${body.deposit}, 'vacant'
+        ${body.rent}, ${body.deposit}, ${body.deposit}, 'vacant',
+        ${body.postalCode ?? null}, ${body.levies ?? null}, ${body.municipal ?? null},
+        ${body.purchasePrice ?? null}, ${body.bankOwed ?? null}
       )
       RETURNING id, unit_number AS "unitNumber", rent::float8 AS rent,
         deposit::float8 AS deposit, status, building_id AS "buildingId",
@@ -467,6 +480,72 @@ portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => 
     `
 
     res.status(201).json({ data: rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Landlord: update ownership / finance details for a unit */
+portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const body = z
+      .object({
+        postalCode: z.string().max(32).optional().nullable(),
+        levies: z.number().nonnegative().optional().nullable(),
+        municipal: z.number().nonnegative().optional().nullable(),
+        purchasePrice: z.number().nonnegative().optional().nullable(),
+        bankOwed: z.number().nonnegative().optional().nullable(),
+      })
+      .parse(req.body)
+
+    const existing = await sql`
+      SELECT
+        a.id,
+        a.postal_code,
+        a.levies,
+        a.municipal,
+        a.purchase_price,
+        a.bank_owed
+      FROM apartments a
+      JOIN landlords l ON l.id = a.landlord_id
+      WHERE a.id = ${id}
+        AND l.user_id = ${req.auth!.sub}
+        AND a.org_id = ${req.orgId!}
+      LIMIT 1
+    `
+    if (existing.length === 0) throw new AppError(404, 'Unit not found')
+
+    const current = existing[0]
+    const postalCode =
+      body.postalCode !== undefined ? body.postalCode?.trim() || null : current.postal_code
+    const levies = body.levies !== undefined ? body.levies : current.levies
+    const municipal = body.municipal !== undefined ? body.municipal : current.municipal
+    const purchasePrice =
+      body.purchasePrice !== undefined ? body.purchasePrice : current.purchase_price
+    const bankOwed = body.bankOwed !== undefined ? body.bankOwed : current.bank_owed
+
+    const rows = await sql`
+      UPDATE apartments
+      SET
+        postal_code = ${postalCode},
+        levies = ${levies},
+        municipal = ${municipal},
+        purchase_price = ${purchasePrice},
+        bank_owed = ${bankOwed},
+        updated_at = now()
+      WHERE id = ${id} AND org_id = ${req.orgId!}
+      RETURNING
+        id,
+        unit_number AS "unitNumber",
+        postal_code AS "postalCode",
+        levies::float8 AS levies,
+        municipal::float8 AS municipal,
+        purchase_price::float8 AS "purchasePrice",
+        bank_owed::float8 AS "bankOwed"
+    `
+
+    res.json({ data: rows[0] })
   } catch (err) {
     next(err)
   }

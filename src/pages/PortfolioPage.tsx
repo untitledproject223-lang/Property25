@@ -228,12 +228,14 @@ export default function PortfolioPage() {
                     )}
                   </td>
                   <td>
-                    <div>
-                      <strong>{building.name}</strong>
-                    </div>
-                    <div style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>
-                      Unit {apartment.unitNumber}
-                    </div>
+                    <Link className="link-quiet" to={`/units/${apartment.id}`}>
+                      <div>
+                        <strong>{building.name}</strong>
+                      </div>
+                      <div style={{ color: 'var(--ink-muted)', fontSize: '0.85rem' }}>
+                        Unit {apartment.unitNumber}
+                      </div>
+                    </Link>
                   </td>
                   <td>{formatMoney(apartment.rent)}</td>
                   <td>{tenant ? formatMoney(depositBalance) : '—'}</td>

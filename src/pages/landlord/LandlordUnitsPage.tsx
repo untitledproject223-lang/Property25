@@ -1,38 +1,62 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import UnitOnboardingForm, {
+  type UnitOnboardingPayload,
+} from '../../components/UnitOnboardingForm'
 import {
   createLandlordUnit,
-  fetchLandlordBuildings,
   fetchLandlordPortfolio,
+  updateLandlordUnitDetails,
 } from '../../data/api'
-import { formatMoney } from '../../data/utils'
+import { formatDate, formatMoney } from '../../data/utils'
+import './LandlordUnitsPage.css'
+
+function hasFinanceDetails(unit: Record<string, unknown>) {
+  return (
+    unit.levies != null &&
+    unit.municipal != null &&
+    unit.purchasePrice != null &&
+    unit.bankOwed != null
+  )
+}
+
+function monthsToPayOff(bankOwed: number, rent: number) {
+  if (!(bankOwed > 0)) return 0
+  if (!(rent > 0)) return null
+  return Math.ceil(bankOwed / rent)
+}
 
 export default function LandlordUnitsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [units, setUnits] = useState<Array<Record<string, unknown>>>([])
-  const [buildings, setBuildings] = useState<Array<{ id: string; name: string; address: string }>>(
-    [],
-  )
   const [error, setError] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(searchParams.get('add') === '1')
-
-  const [buildingId, setBuildingId] = useState('')
-  const [newBuildingName, setNewBuildingName] = useState('')
-  const [newBuildingAddress, setNewBuildingAddress] = useState('')
-  const [unitNumber, setUnitNumber] = useState('')
-  const [rent, setRent] = useState('')
-  const [deposit, setDeposit] = useState('')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [editingDetails, setEditingDetails] = useState(false)
   const [saving, setSaving] = useState(false)
+
+  const [postalCode, setPostalCode] = useState('')
+  const [levies, setLevies] = useState('')
+  const [municipal, setMunicipal] = useState('')
+  const [purchasePrice, setPurchasePrice] = useState('')
+  const [bankOwed, setBankOwed] = useState('')
+  const [detailsSaving, setDetailsSaving] = useState(false)
 
   async function load() {
     try {
-      const [portfolio, b] = await Promise.all([
-        fetchLandlordPortfolio(),
-        fetchLandlordBuildings(),
-      ])
+      const portfolio = await fetchLandlordPortfolio()
       setUnits(portfolio.data.units)
-      setBuildings(b.data)
-      if (!buildingId && b.data[0]) setBuildingId(b.data[0].id)
+      const fromQuery = searchParams.get('unit')
+      setSelectedId((prev) => {
+        if (
+          fromQuery &&
+          portfolio.data.units.some((u) => String(u.id) === fromQuery)
+        ) {
+          return fromQuery
+        }
+        if (prev && portfolio.data.units.some((u) => String(u.id) === prev)) return prev
+        return portfolio.data.units[0] ? String(portfolio.data.units[0].id) : null
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load units')
     }
@@ -43,6 +67,32 @@ export default function LandlordUnitsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => {
+    const fromQuery = searchParams.get('unit')
+    if (!fromQuery) return
+    if (units.some((u) => String(u.id) === fromQuery)) {
+      setSelectedId(fromQuery)
+    }
+  }, [searchParams, units])
+
+  const selected = useMemo(
+    () => units.find((u) => String(u.id) === selectedId) ?? null,
+    [units, selectedId],
+  )
+
+  useEffect(() => {
+    if (!selected) {
+      setEditingDetails(false)
+      return
+    }
+    setPostalCode(String(selected.postalCode ?? ''))
+    setLevies(selected.levies != null ? String(selected.levies) : '')
+    setMunicipal(selected.municipal != null ? String(selected.municipal) : '')
+    setPurchasePrice(selected.purchasePrice != null ? String(selected.purchasePrice) : '')
+    setBankOwed(selected.bankOwed != null ? String(selected.bankOwed) : '')
+    setEditingDetails(!hasFinanceDetails(selected))
+  }, [selected])
+
   function openAdd() {
     setShowAdd(true)
     setError(null)
@@ -52,49 +102,76 @@ export default function LandlordUnitsPage() {
   function closeAdd() {
     setShowAdd(false)
     setError(null)
-    setUnitNumber('')
-    setRent('')
-    setDeposit('')
-    setNewBuildingName('')
-    setNewBuildingAddress('')
     setSearchParams({})
   }
 
-  async function onSubmit(e: FormEvent) {
-    e.preventDefault()
+  async function onSubmit(payload: UnitOnboardingPayload) {
     setError(null)
-    const rentValue = Number(rent)
-    const depositValue = Number(deposit)
-    if (!unitNumber.trim()) {
-      setError('Unit number is required.')
-      return
-    }
-    if (!rentValue || rentValue < 0) {
-      setError('Enter a valid rent amount.')
-      return
-    }
-    if (!buildingId && !newBuildingName.trim()) {
-      setError('Select or create a building.')
-      return
-    }
     setSaving(true)
     try {
-      await createLandlordUnit({
-        buildingId: newBuildingName.trim() ? undefined : buildingId || undefined,
-        newBuildingName: newBuildingName.trim() || undefined,
-        newBuildingAddress: newBuildingAddress.trim() || undefined,
-        unitNumber: unitNumber.trim(),
-        rent: rentValue,
-        deposit: depositValue || rentValue * 2,
+      const created = await createLandlordUnit({
+        newBuildingName: payload.buildingName,
+        newBuildingAddress: payload.buildingAddress,
+        unitNumber: payload.unitNumber,
+        rent: payload.rent,
+        deposit: payload.deposit,
+        postalCode: payload.postalCode,
+        levies: payload.levies,
+        municipal: payload.municipal,
+        purchasePrice: payload.purchasePrice,
+        bankOwed: payload.bankOwed,
       })
       closeAdd()
       await load()
+      if (created.data.id) setSelectedId(String(created.data.id))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not add unit')
     } finally {
       setSaving(false)
     }
   }
+
+  async function onSaveDetails(e: FormEvent) {
+    e.preventDefault()
+    if (!selected) return
+    setError(null)
+    const leviesValue = Number(levies)
+    const municipalValue = Number(municipal)
+    const purchaseValue = Number(purchasePrice)
+    const bankValue = Number(bankOwed)
+    if (
+      !Number.isFinite(leviesValue) ||
+      !Number.isFinite(municipalValue) ||
+      !Number.isFinite(purchaseValue) ||
+      !Number.isFinite(bankValue)
+    ) {
+      setError('Enter valid amounts for levies, municipal, purchase price, and bank balance.')
+      return
+    }
+    setDetailsSaving(true)
+    try {
+      await updateLandlordUnitDetails(String(selected.id), {
+        postalCode: postalCode.trim() || null,
+        levies: leviesValue,
+        municipal: municipalValue,
+        purchasePrice: purchaseValue,
+        bankOwed: bankValue,
+      })
+      await load()
+      setEditingDetails(false)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update unit details')
+    } finally {
+      setDetailsSaving(false)
+    }
+  }
+
+  const rentAmount = Number(selected?.rent) || 0
+  const bankAmount = Number(selected?.bankOwed) || 0
+  const payoffMonths =
+    selected && hasFinanceDetails(selected)
+      ? monthsToPayOff(bankAmount, rentAmount)
+      : null
 
   return (
     <div className="page">
@@ -103,127 +180,236 @@ export default function LandlordUnitsPage() {
           <h1>My units</h1>
           <p>Units registered under your landlord profile.</p>
         </div>
-        <button type="button" className="btn btn-primary btn-compact" onClick={openAdd}>
-          Add unit
-        </button>
+        {!showAdd ? (
+          <button type="button" className="btn btn-primary btn-compact" onClick={openAdd}>
+            Add unit
+          </button>
+        ) : null}
       </header>
 
-      {error ? <p className="login-error">{error}</p> : null}
-
       {showAdd ? (
-        <form className="form-grid" onSubmit={onSubmit} style={{ marginBottom: '1.5rem' }}>
-          <fieldset className="form-section">
-            <legend>Add unit</legend>
-            <label className="field field-span">
-              <span className="field-label">Existing building</span>
-              <select
-                value={buildingId}
-                onChange={(e) => setBuildingId(e.target.value)}
-                disabled={Boolean(newBuildingName.trim())}
-              >
-                <option value="">Select…</option>
-                {buildings.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name} — {b.address}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="field">
-              <span className="field-label">Or new building name</span>
-              <input
-                value={newBuildingName}
-                onChange={(e) => setNewBuildingName(e.target.value)}
-                placeholder="Leave blank to use existing"
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">New building address</span>
-              <input
-                value={newBuildingAddress}
-                onChange={(e) => setNewBuildingAddress(e.target.value)}
-                placeholder="Street address"
-                disabled={!newBuildingName.trim()}
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Unit number</span>
-              <input
-                value={unitNumber}
-                onChange={(e) => setUnitNumber(e.target.value)}
-                required
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Monthly rent</span>
-              <input
-                type="number"
-                min={0}
-                value={rent}
-                onChange={(e) => setRent(e.target.value)}
-                required
-              />
-            </label>
-            <label className="field">
-              <span className="field-label">Deposit</span>
-              <input
-                type="number"
-                min={0}
-                value={deposit}
-                onChange={(e) => setDeposit(e.target.value)}
-                placeholder="Defaults to 2× rent"
-              />
-            </label>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button type="submit" className="btn btn-primary" disabled={saving}>
-                {saving ? 'Saving…' : 'Save unit'}
-              </button>
-              <button type="button" className="btn btn-ghost" onClick={closeAdd}>
-                Cancel
-              </button>
-            </div>
-          </fieldset>
-        </form>
-      ) : null}
-
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Unit</th>
-              <th>Address</th>
-              <th>Rent</th>
-              <th>Deposit</th>
-              <th>Status</th>
-              <th>Tenant</th>
-            </tr>
-          </thead>
-          <tbody>
-            {units.map((u) => (
-              <tr key={String(u.id)}>
-                <td>
-                  {String(u.buildingName)} · {String(u.unitNumber)}
-                </td>
-                <td>{String(u.buildingAddress)}</td>
-                <td>{formatMoney(Number(u.rent) || 0)}</td>
-                <td>{formatMoney(Number(u.deposit) || 0)}</td>
-                <td>
-                  <span className="badge">{String(u.status)}</span>
-                </td>
-                <td>{u.tenantName ? String(u.tenantName) : '—'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {units.length === 0 ? (
-          <div className="empty-state">
-            No units yet.{' '}
-            <button type="button" className="btn btn-ghost btn-compact" onClick={openAdd}>
-              Add your first unit
+        <div className="panel">
+          <div className="panel-header">
+            <h2>Add unit</h2>
+            <button type="button" className="btn btn-ghost btn-compact" onClick={closeAdd}>
+              Cancel
             </button>
           </div>
-        ) : null}
-      </div>
+          <div className="panel-body">
+            <UnitOnboardingForm
+              submitting={saving}
+              error={error}
+              onCancel={closeAdd}
+              onSubmit={onSubmit}
+            />
+          </div>
+        </div>
+      ) : (
+        <>
+          {error ? <p className="login-error">{error}</p> : null}
+
+          <div className="units-split">
+            <section className="units-list-panel">
+              <h2>Units</h2>
+              <div className="units-list">
+                {units.map((u) => {
+                  const id = String(u.id)
+                  const active = id === selectedId
+                  return (
+                    <button
+                      key={id}
+                      type="button"
+                      className={`units-list-item${active ? ' is-active' : ''}`}
+                      onClick={() => {
+                        setSelectedId(id)
+                        setSearchParams({ unit: id })
+                      }}
+                    >
+                      <strong>
+                        {String(u.buildingName)} · Unit {String(u.unitNumber)}
+                      </strong>
+                      <span>{String(u.buildingAddress)}</span>
+                      <span className="badge">{String(u.status)}</span>
+                    </button>
+                  )
+                })}
+              </div>
+              {units.length === 0 ? (
+                <div className="empty-state">
+                  No units yet.{' '}
+                  <button type="button" className="btn btn-ghost btn-compact" onClick={openAdd}>
+                    Add your first unit
+                  </button>
+                </div>
+              ) : null}
+            </section>
+
+            <section className="units-summary-panel">
+              {selected ? (
+                <>
+                  <header className="units-summary-header">
+                    <div>
+                      <p className="units-summary-eyebrow">Unit summary</p>
+                      <h2>
+                        {String(selected.buildingName)} · Unit {String(selected.unitNumber)}
+                      </h2>
+                      <p className="units-summary-sub">{String(selected.buildingAddress)}</p>
+                    </div>
+                    <span className="badge">{String(selected.status)}</span>
+                  </header>
+
+                  <dl className="units-summary-grid">
+                    <div>
+                      <dt>Postal / ZIP code</dt>
+                      <dd>{String(selected.postalCode || '—')}</dd>
+                    </div>
+                    <div>
+                      <dt>Deposit</dt>
+                      <dd>{formatMoney(Number(selected.deposit) || 0)}</dd>
+                    </div>
+                    <div>
+                      <dt>Deposit balance</dt>
+                      <dd>
+                        {formatMoney(
+                          Number(
+                            selected.depositBalance != null
+                              ? selected.depositBalance
+                              : selected.deposit,
+                          ) || 0,
+                        )}
+                      </dd>
+                    </div>
+                    <div>
+                      <dt>Lease term end</dt>
+                      <dd>
+                        {selected.leaseEnd
+                          ? formatDate(String(selected.leaseEnd))
+                          : 'No current tenant'}
+                      </dd>
+                    </div>
+                  </dl>
+
+                  {hasFinanceDetails(selected) && !editingDetails ? (
+                    <>
+                      <dl className="units-summary-grid units-summary-finance">
+                        <div>
+                          <dt>Levies (monthly)</dt>
+                          <dd>{formatMoney(Number(selected.levies) || 0)}</dd>
+                        </div>
+                        <div>
+                          <dt>Municipal (monthly)</dt>
+                          <dd>{formatMoney(Number(selected.municipal) || 0)}</dd>
+                        </div>
+                        <div>
+                          <dt>Purchase price</dt>
+                          <dd>{formatMoney(Number(selected.purchasePrice) || 0)}</dd>
+                        </div>
+                        <div>
+                          <dt>Still owed to bank</dt>
+                          <dd>{formatMoney(bankAmount)}</dd>
+                        </div>
+                        <div className="units-summary-span">
+                          <dt>Estimated months to pay off bank</dt>
+                          <dd>
+                            {payoffMonths == null
+                              ? 'Add a rent amount to estimate payoff'
+                              : payoffMonths === 0
+                                ? 'Paid off / no balance owed'
+                                : `${payoffMonths} month${payoffMonths === 1 ? '' : 's'} at current rent (${formatMoney(rentAmount)}/mo)`}
+                          </dd>
+                        </div>
+                      </dl>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        onClick={() => setEditingDetails(true)}
+                      >
+                        Edit unit details
+                      </button>
+                    </>
+                  ) : (
+                    <form className="units-details-form" onSubmit={onSaveDetails}>
+                      <p className="units-summary-sub">
+                        {hasFinanceDetails(selected)
+                          ? 'Update ownership and finance details for this unit.'
+                          : 'Add levies, municipal costs, purchase price, and bank balance to unlock the unit summary.'}
+                      </p>
+                      <label>
+                        Postal / ZIP code
+                        <input
+                          value={postalCode}
+                          onChange={(e) => setPostalCode(e.target.value)}
+                          placeholder="e.g. 8001"
+                        />
+                      </label>
+                      <label>
+                        Levies (monthly)
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={levies}
+                          onChange={(e) => setLevies(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Municipal (monthly)
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={municipal}
+                          onChange={(e) => setMunicipal(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Purchase price
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={purchasePrice}
+                          onChange={(e) => setPurchasePrice(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Still owed to bank
+                        <input
+                          type="number"
+                          min={0}
+                          step="0.01"
+                          value={bankOwed}
+                          onChange={(e) => setBankOwed(e.target.value)}
+                          required
+                        />
+                      </label>
+                      <div className="units-details-actions">
+                        <button type="submit" className="btn btn-primary" disabled={detailsSaving}>
+                          {detailsSaving ? 'Saving…' : 'Update unit details'}
+                        </button>
+                        {hasFinanceDetails(selected) ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost"
+                            onClick={() => setEditingDetails(false)}
+                          >
+                            Cancel
+                          </button>
+                        ) : null}
+                      </div>
+                    </form>
+                  )}
+                </>
+              ) : (
+                <div className="empty-state">Select a unit to view its summary.</div>
+              )}
+            </section>
+          </div>
+        </>
+      )}
 
       <p className="muted" style={{ marginTop: '1rem' }}>
         <Link to="/landlord/profile">Back to profile</Link>

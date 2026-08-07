@@ -129,6 +129,11 @@ export async function createApartment(input: {
   deposit: number
   status?: 'vacant' | 'occupied' | 'notice'
   nextDueDate?: string | null
+  postalCode?: string | null
+  levies?: number | null
+  municipal?: number | null
+  purchasePrice?: number | null
+  bankOwed?: number | null
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/apartments', {
     method: 'POST',
@@ -547,11 +552,32 @@ export async function createLandlordUnit(input: {
   unitNumber: string
   rent: number
   deposit: number
+  postalCode?: string | null
+  levies?: number | null
+  municipal?: number | null
+  purchasePrice?: number | null
+  bankOwed?: number | null
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/portal/landlord/units', {
     method: 'POST',
     body: input,
   })
+}
+
+export async function updateLandlordUnitDetails(
+  unitId: string,
+  input: {
+    postalCode?: string | null
+    levies?: number | null
+    municipal?: number | null
+    purchasePrice?: number | null
+    bankOwed?: number | null
+  },
+) {
+  return apiRequest<{ data: Record<string, unknown> }>(
+    `/api/portal/landlord/units/${unitId}/details`,
+    { method: 'PATCH', body: input },
+  )
 }
 
 export async function listIssues() {

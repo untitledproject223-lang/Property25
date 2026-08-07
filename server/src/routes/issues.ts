@@ -105,6 +105,64 @@ function isTenantBillableDecision(issueType: string, decision: Record<string, un
   )
 }
 
+/** Correspondence opens after acceptance, or after tenant acknowledges pay when billed. */
+function canCorrespond(issueType: string, decision: Record<string, unknown>) {
+  if (!isTicketAccepted(decision)) return false
+  if (!isTenantBillableDecision(issueType, decision)) return true
+  return Boolean(decision.tenantPayAccepted || decision.tenantPaymentMethod)
+}
+
+async function createMaintenanceInvoiceForIssue(opts: {
+  orgId: string
+  tenantId: string
+  issueId: string
+  subject: string
+  materials: number
+  labour: number
+}) {
+  const items: Array<{ type: string; description: string; amount: number }> = []
+  if (opts.materials > 0) {
+    items.push({
+      type: 'maintenance',
+      description: `Materials — ${opts.subject}`,
+      amount: opts.materials,
+    })
+  }
+  if (opts.labour > 0) {
+    items.push({
+      type: 'maintenance',
+      description: `Labour — ${opts.subject}`,
+      amount: opts.labour,
+    })
+  }
+  if (items.length === 0) {
+    const total = opts.materials + opts.labour
+    if (total <= 0) return null
+    items.push({
+      type: 'maintenance',
+      description: `Maintenance — ${opts.subject}`,
+      amount: total,
+    })
+  }
+  const total = items.reduce((sum, item) => sum + item.amount, 0)
+  const issuedAt = new Date().toISOString().slice(0, 10)
+  const dueDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+  const rows = await sql`
+    INSERT INTO invoices (
+      org_id, tenant_id, issued_at, due_date, items_json, total, status, notes,
+      is_recurring, billing_kind, issue_id
+    )
+    VALUES (
+      ${opts.orgId}, ${opts.tenantId}, ${issuedAt}, ${dueDate},
+      ${JSON.stringify(items)}::jsonb, ${total}, 'sent',
+      ${`Linked to ticket: ${opts.subject}`},
+      false, 'one_time', ${opts.issueId}
+    )
+    RETURNING id
+  `
+  return rows[0] ? String(rows[0].id) : null
+}
+
 async function applyDepositDeduction(opts: {
   orgId: string
   tenantId: string
@@ -382,10 +440,12 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       if (existingStatus === 'resolved' || existingStatus === 'rejected') {
         throw new AppError(400, 'This ticket is closed')
       }
-      if (!isTicketAccepted(decision)) {
+      if (!canCorrespond(issueType, decision)) {
         throw new AppError(
           400,
-          'This ticket must be accepted before correspondence can begin',
+          isTicketAccepted(decision)
+            ? 'The tenant must accept payment responsibility before correspondence can continue'
+            : 'This ticket must be accepted before correspondence can begin',
         )
       }
       const author =
@@ -428,7 +488,17 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       const materials = d.materialsCost ?? 0
       const labour = d.labourCost ?? 0
       const decider = auth.role === 'landlord' ? 'landlord' : 'agent'
-      const preferredPayment = String(decision.preferredPayment ?? '')
+      const subject = String(existing.subject ?? 'Maintenance')
+      const tenantPays =
+        d.outcome === 'conditional' && (d.payer === 'tenant' || d.payer === 'split')
+
+      if (tenantPays && materials + labour <= 0) {
+        throw new AppError(
+          400,
+          'Enter materials and/or labour cost when the tenant is responsible for payment',
+        )
+      }
+
       decision = {
         ...decision,
         outcome: d.outcome,
@@ -488,39 +558,37 @@ issuesRouter.patch('/:id', async (req, res, next) => {
         })
       } else {
         status = 'pending'
-        const payerLabel =
-          d.payer === 'split'
-            ? `split (landlord ${d.landlordShare ?? 0}% / tenant ${d.tenantShare ?? 0}%)`
-            : 'tenant'
         messages.push({
           id: crypto.randomUUID(),
           author: decider,
-          body: `Ticket approved conditionally. Payment responsibility: ${payerLabel}.${
+          body: `Ticket accepted: tenant pays.${
             d.workDescription ? ` Work: ${d.workDescription}.` : ''
-          } Materials R${materials}, labour R${labour}, total R${materials + labour}. Correspondence is now open.`,
+          } Materials R${materials}, labour R${labour}, total R${materials + labour}.`,
           at: new Date().toISOString(),
         })
 
-        if (
-          isTenantBillableDecision(issueType, decision) &&
-          preferredPayment === 'deposit'
-        ) {
-          await applyDepositDeduction({
+        if (isTenantBillableDecision(issueType, decision)) {
+          const invoiceId = await createMaintenanceInvoiceForIssue({
             orgId: auth.orgId,
             tenantId,
-            amount: tenantBillableAmount(decision),
-            decision,
-            messages,
+            issueId: id,
+            subject,
+            materials,
+            labour,
           })
-        } else if (
-          isTenantBillableDecision(issueType, decision) &&
-          preferredPayment === 'invoice'
-        ) {
-          decision.tenantPaymentMethod = 'invoice'
+          if (invoiceId) {
+            decision.invoiceId = invoiceId
+            messages.push({
+              id: crypto.randomUUID(),
+              author: decider,
+              body: `A maintenance invoice (R${materials + labour}) has been issued to the tenant and is visible on the invoices page.`,
+              at: new Date().toISOString(),
+            })
+          }
           messages.push({
             id: crypto.randomUUID(),
-            author: 'tenant',
-            body: 'Tenant previously chose to be invoiced for maintenance if charged.',
+            author: 'system',
+            body: 'Tenant action required: please confirm that you accept responsibility to pay for this maintenance work. Chat will open after you confirm.',
             at: new Date().toISOString(),
           })
         }
@@ -529,7 +597,7 @@ issuesRouter.patch('/:id', async (req, res, next) => {
 
     if (body.tenantPayment) {
       if (auth.role !== 'tenant') {
-        throw new AppError(403, 'Only the tenant can choose how to pay for maintenance')
+        throw new AppError(403, 'Only the tenant can acknowledge payment for maintenance')
       }
       if (existingStatus === 'resolved' || existingStatus === 'rejected') {
         throw new AppError(400, 'This ticket is closed')
@@ -537,8 +605,8 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       if (!isTenantBillableDecision(issueType, decision)) {
         throw new AppError(400, 'This ticket is not charged to the tenant')
       }
-      if (decision.tenantPaymentMethod) {
-        throw new AppError(400, 'A payment method has already been chosen for this ticket')
+      if (decision.tenantPayAccepted || decision.tenantPaymentMethod) {
+        throw new AppError(400, 'Payment responsibility has already been acknowledged')
       }
       if (body.tenantPayment.method === 'deposit') {
         await applyDepositDeduction({
@@ -548,12 +616,14 @@ issuesRouter.patch('/:id', async (req, res, next) => {
           decision,
           messages,
         })
+        decision.tenantPayAccepted = true
       } else {
         decision.tenantPaymentMethod = 'invoice'
+        decision.tenantPayAccepted = true
         messages.push({
           id: crypto.randomUUID(),
           author: 'tenant',
-          body: 'Tenant chose to be invoiced for the maintenance charge.',
+          body: 'Tenant accepted responsibility to pay for this maintenance work. Correspondence is now open.',
           at: new Date().toISOString(),
         })
       }
@@ -566,8 +636,11 @@ issuesRouter.patch('/:id', async (req, res, next) => {
       if (existingStatus === 'resolved' || existingStatus === 'rejected') {
         throw new AppError(400, 'This ticket is already closed')
       }
-      if (!isTicketAccepted(decision)) {
-        throw new AppError(400, 'Only an accepted ticket can be closed with an outcome')
+      if (!canCorrespond(issueType, decision)) {
+        throw new AppError(
+          400,
+          'Only an accepted ticket with open correspondence can be closed',
+        )
       }
       const closer = 'tenant'
       const resultLabel =

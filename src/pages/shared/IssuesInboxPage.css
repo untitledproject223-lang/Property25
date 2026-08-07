@@ -245,8 +245,26 @@
   text-transform: uppercase;
 }
 
+.ticket-form-narrow {
+  max-width: 28rem;
+  width: 100%;
+  margin: 0 0 1.5rem;
+}
+
+.ticket-form-narrow .form-section {
+  padding: 1rem 1.1rem;
+}
+
+.ticket-form-narrow .field-span {
+  grid-column: 1 / -1;
+}
+
 .ticket-decision-first {
   border-bottom: 1px solid var(--line);
+}
+
+.ticket-decision-first .ticket-form-narrow {
+  margin-bottom: 0;
 }
 
 .ticket-decision-intro {

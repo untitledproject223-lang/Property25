@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import {
   setUnitTicketManager,
   fetchLandlordPortfolio,
@@ -167,8 +168,6 @@ export default function LandlordPortfolioPage() {
                 <th>Unit</th>
                 <th>Lease term</th>
                 <th>Rent</th>
-                <th>Balance</th>
-                <th>Deposit balance</th>
                 <th>Payment status</th>
                 <th>Open tickets</th>
                 <th>Ticket management</th>
@@ -199,23 +198,15 @@ export default function LandlordPortfolioPage() {
                       </button>
                     </td>
                     <td>
-                      {String(u.buildingName)} · Unit {String(u.unitNumber)}
-                      <br />
-                      <small>{String(u.buildingAddress)}</small>
+                      <Link className="link-quiet" to={`/landlord/units?unit=${String(u.id)}`}>
+                        {String(u.buildingName)} · Unit {String(u.unitNumber)}
+                      </Link>
                     </td>
                     <td>
                       {formatDate(String(u.leaseStart ?? ''))} →{' '}
                       {formatDate(String(u.leaseEnd ?? ''))}
                     </td>
                     <td>{formatMoney(Number(u.rent) || 0)}</td>
-                    <td>{formatMoney(Number(u.balance) || 0)}</td>
-                    <td>
-                      {formatMoney(
-                        Number(
-                          u.depositBalance != null ? u.depositBalance : u.deposit,
-                        ) || 0,
-                      )}
-                    </td>
                     <td>
                       <span className={`badge tone-${badge.tone}`}>{badge.label}</span>
                     </td>
@@ -241,9 +232,9 @@ export default function LandlordPortfolioPage() {
                             void onHandoff(String(u.id), value as 'landlord' | 'agent')
                           }}
                         >
-                          <option value="landlord">Landlord manages</option>
+                          <option value="landlord">Managed by landlord</option>
                           {hasAgent ? (
-                            <option value="agent">Stay with current agent</option>
+                            <option value="agent">Managed by agent</option>
                           ) : null}
                           <option value="change-agent">
                             {hasAgent ? 'Change agent (invite link)' : 'Assign agent (invite link)'}
@@ -295,9 +286,9 @@ export default function LandlordPortfolioPage() {
                 {vacant.map((u) => (
                   <tr key={String(u.id)}>
                     <td>
-                      {String(u.buildingName)} · Unit {String(u.unitNumber)}
-                      <br />
-                      <small>{String(u.buildingAddress)}</small>
+                      <Link className="link-quiet" to={`/landlord/units?unit=${String(u.id)}`}>
+                        {String(u.buildingName)} · Unit {String(u.unitNumber)}
+                      </Link>
                     </td>
                     <td>{String(u.status)}</td>
                     <td>{formatMoney(Number(u.rent) || 0)}</td>

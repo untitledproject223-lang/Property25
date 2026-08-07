@@ -87,5 +87,31 @@ export async function ensureCriticalSchema() {
     ON CONFLICT (id) DO NOTHING
   `)
 
-  console.log('schema: deposit_balance + lease termination + managing agent ready')
+  await sql.query(`
+    ALTER TABLE apartments
+      ADD COLUMN IF NOT EXISTS postal_code TEXT
+  `)
+  await sql.query(`
+    ALTER TABLE apartments
+      ADD COLUMN IF NOT EXISTS levies NUMERIC(12, 2)
+  `)
+  await sql.query(`
+    ALTER TABLE apartments
+      ADD COLUMN IF NOT EXISTS municipal NUMERIC(12, 2)
+  `)
+  await sql.query(`
+    ALTER TABLE apartments
+      ADD COLUMN IF NOT EXISTS purchase_price NUMERIC(12, 2)
+  `)
+  await sql.query(`
+    ALTER TABLE apartments
+      ADD COLUMN IF NOT EXISTS bank_owed NUMERIC(12, 2)
+  `)
+  await sql.query(`
+    INSERT INTO schema_migrations (id)
+    VALUES ('010_unit_finance.sql')
+    ON CONFLICT (id) DO NOTHING
+  `)
+
+  console.log('schema: deposit_balance + lease termination + managing agent + unit finance ready')
 }

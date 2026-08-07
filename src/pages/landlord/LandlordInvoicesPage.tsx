@@ -35,7 +35,6 @@ export default function LandlordInvoicesPage() {
   const [includeRent, setIncludeRent] = useState(true)
   const [amount, setAmount] = useState('')
   const [description, setDescription] = useState('')
-  const [notes, setNotes] = useState('')
 
   const refresh = useCallback(async () => {
     const [inv, t, iss] = await Promise.all([
@@ -79,7 +78,6 @@ export default function LandlordInvoicesPage() {
     setIncludeRent(false)
     setAmount(String(tenantMaintenanceAmount(decision) || ''))
     setDescription(ticketInvoiceDescription(String(ticket.subject), decision))
-    setNotes(`Linked to ticket: ${String(ticket.subject)}`)
   }
 
   async function onCreate(e: FormEvent) {
@@ -99,7 +97,6 @@ export default function LandlordInvoicesPage() {
           billingKind: 'one_time',
           isRecurring: false,
           issueId,
-          notes: notes || undefined,
           items: [
             {
               type: 'maintenance',
@@ -121,7 +118,6 @@ export default function LandlordInvoicesPage() {
           status: 'sent',
           billingKind: 'one_time',
           isRecurring: false,
-          notes: notes || undefined,
           items: [
             {
               type: 'other',
@@ -139,7 +135,6 @@ export default function LandlordInvoicesPage() {
           status: 'sent',
           billingKind,
           isRecurring: billingKind === 'recurring',
-          notes: notes || undefined,
           items: [
             {
               type: 'rent',
@@ -152,7 +147,6 @@ export default function LandlordInvoicesPage() {
       } else {
         throw new Error('Enter a valid one-time amount, or include monthly rent')
       }
-      setNotes('')
       setIssueId('')
       setAmount('')
       setDescription('')
@@ -334,15 +328,6 @@ export default function LandlordInvoicesPage() {
               </label>
             </div>
           )}
-
-          <label className="invoice-field invoice-notes-field">
-            <span>Reason</span>
-            <input
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Why this invoice is being issued…"
-            />
-          </label>
 
           <div className="invoice-compose-actions">
             {selectedTenant ? (

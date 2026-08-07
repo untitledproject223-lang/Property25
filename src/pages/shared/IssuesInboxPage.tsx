@@ -1,20 +1,21 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '../../data/AuthContext'
-import { createInvoice, createIssue, listIssues, patchIssue } from '../../data/api'
+import { createIssue, listIssues, patchIssue } from '../../data/api'
 import {
   isTenantBillableTicket,
   tenantMaintenanceAmount,
-  ticketInvoiceDescription,
 } from '../../data/invoiceHelpers'
 import { formatDateTimeShort, formatMoney } from '../../data/utils'
 import './IssuesInboxPage.css'
 
 type IssueRow = Record<string, unknown>
+type DecisionChoice = 'accept_landlord' | 'accept_tenant' | 'reject' | 'accept'
 
 function authorLabel(author: string) {
   if (author === 'tenant') return 'Tenant'
   if (author === 'landlord') return 'Landlord'
   if (author === 'agent') return 'Agent'
+  if (author === 'system') return 'System'
   return author
 }
 
@@ -51,24 +52,14 @@ export default function IssuesInboxPage({
   const [issueType, setIssueType] = useState<'maintenance' | 'general' | 'invoice'>(
     'general',
   )
-  const [preferredPayment, setPreferredPayment] = useState<'invoice' | 'deposit'>(
-    'invoice',
-  )
   const [closing, setClosing] = useState(false)
   const [deciding, setDeciding] = useState(false)
-  const [invoicing, setInvoicing] = useState(false)
   const [paying, setPaying] = useState(false)
-  const [invoiceNotice, setInvoiceNotice] = useState<string | null>(null)
 
-  const [decisionOutcome, setDecisionOutcome] = useState<'accept' | 'reject' | 'conditional'>(
-    'accept',
-  )
-  const [payer, setPayer] = useState<'tenant' | 'split'>('tenant')
+  const [decisionChoice, setDecisionChoice] = useState<DecisionChoice>('accept_landlord')
   const [workDescription, setWorkDescription] = useState('')
   const [materialsCost, setMaterialsCost] = useState('')
   const [labourCost, setLabourCost] = useState('')
-  const [landlordShare, setLandlordShare] = useState('50')
-  const [tenantShare, setTenantShare] = useState('50')
   const [decisionNote, setDecisionNote] = useState('')
 
   const refresh = useCallback(async (silent = false) => {
@@ -113,77 +104,42 @@ export default function IssuesInboxPage({
     (user?.role === 'admin' ||
       (managementOwner === 'landlord' && user?.role === 'landlord') ||
       (managementOwner === 'agent' && user?.role === 'agent'))
-  const chatOpen = isAccepted && !isClosed
-  const closureResult = String(decision.closureResult ?? '')
-  const tenantCanClose = allowClose && user?.role === 'tenant' && chatOpen
-  const paymentMethod = String(decision.tenantPaymentMethod ?? '')
   const billable = isTenantBillableTicket({
     issueType: selected?.issueType,
     decision,
   })
-  const canCreateTicketInvoice =
-    Boolean(selected) &&
-    (user?.role === 'landlord' || user?.role === 'agent' || user?.role === 'admin') &&
-    billable &&
-    paymentMethod !== 'deposit'
-  const tenantNeedsPaymentChoice =
+  const tenantPayAccepted = Boolean(
+    decision.tenantPayAccepted || decision.tenantPaymentMethod,
+  )
+  const chatOpen = isAccepted && !isClosed && (!billable || tenantPayAccepted)
+  const closureResult = String(decision.closureResult ?? '')
+  const tenantCanClose = allowClose && user?.role === 'tenant' && chatOpen
+  const paymentMethod = String(decision.tenantPaymentMethod ?? '')
+  const tenantNeedsPayAck =
     user?.role === 'tenant' &&
     Boolean(selected) &&
     billable &&
     !isClosed &&
-    !paymentMethod
+    !tenantPayAccepted
   const hasCostRecord =
     decision.materialsCost != null ||
     decision.labourCost != null ||
     decision.totalCost != null ||
     Boolean(decision.workDescription)
 
-  async function onCreateTicketInvoice() {
-    if (!selected || !canCreateTicketInvoice) return
-    setInvoicing(true)
-    setError(null)
-    setInvoiceNotice(null)
-    try {
-      const amount = tenantMaintenanceAmount(decision)
-      if (amount <= 0) {
-        throw new Error('Ticket has no maintenance amount to invoice')
-      }
-      const dueDate = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
-      await createInvoice({
-        tenantId: String(selected.tenantId),
-        dueDate,
-        status: 'sent',
-        billingKind: 'one_time',
-        isRecurring: false,
-        issueId: String(selected.id),
-        notes: `Linked to ticket: ${String(selected.subject)}`,
-        items: [
-          {
-            type: 'maintenance',
-            description: ticketInvoiceDescription(String(selected.subject), decision),
-            amount,
-          },
-        ],
-      })
-      setInvoiceNotice(
-        'Maintenance invoice created and issued to the tenant. It now appears on their invoice page.',
-      )
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not create invoice')
-    } finally {
-      setInvoicing(false)
-    }
-  }
+  useEffect(() => {
+    setDecisionChoice(isMaintenance ? 'accept_landlord' : 'accept')
+  }, [selectedId, isMaintenance])
 
-  async function onTenantPayment(method: 'invoice' | 'deposit') {
-    if (!selectedId || !tenantNeedsPaymentChoice) return
+  async function onTenantAcceptPay() {
+    if (!selectedId || !tenantNeedsPayAck) return
     setPaying(true)
     setError(null)
     try {
-      await patchIssue(selectedId, { tenantPayment: { method } })
+      await patchIssue(selectedId, { tenantPayment: { method: 'invoice' } })
       await refresh()
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not save payment choice')
+      setError(err instanceof Error ? err.message : 'Could not confirm payment')
     } finally {
       setPaying(false)
     }
@@ -197,14 +153,11 @@ export default function IssuesInboxPage({
         subject: subject.trim(),
         issueType,
         message: message.trim() || undefined,
-        preferredPayment:
-          issueType === 'maintenance' ? preferredPayment : undefined,
       })
       setCreating(false)
       setSubject('')
       setMessage('')
       setIssueType('general')
-      setPreferredPayment('invoice')
       await refresh()
       setSelectedId(String(created.data.id))
     } catch (err) {
@@ -249,28 +202,37 @@ export default function IssuesInboxPage({
     setDeciding(true)
     setError(null)
     try {
+      const choice = isMaintenance ? decisionChoice : decisionChoice === 'reject' ? 'reject' : 'accept'
+      const outcome =
+        choice === 'reject'
+          ? 'reject'
+          : choice === 'accept_tenant'
+            ? 'conditional'
+            : 'accept'
+      const materials = Number(materialsCost)
+      const labour = Number(labourCost)
+      if (
+        choice === 'accept_tenant' &&
+        (!(Number.isFinite(materials) && materials >= 0) ||
+          !(Number.isFinite(labour) && labour >= 0) ||
+          materials + labour <= 0)
+      ) {
+        throw new Error('Enter materials and/or labour cost for Accept: tenant pays.')
+      }
       await patchIssue(selectedId, {
         decision: {
-          outcome: decisionOutcome,
-          payer: decisionOutcome === 'conditional' ? payer : undefined,
-          landlordShare:
-            decisionOutcome === 'conditional' && payer === 'split'
-              ? Number(landlordShare)
-              : undefined,
-          tenantShare:
-            decisionOutcome === 'conditional' && payer === 'split'
-              ? Number(tenantShare)
-              : undefined,
+          outcome,
+          payer: choice === 'accept_tenant' ? 'tenant' : undefined,
           workDescription:
-            isMaintenance && decisionOutcome !== 'reject'
+            isMaintenance && choice !== 'reject'
               ? workDescription.trim() || undefined
               : undefined,
           materialsCost:
-            isMaintenance && decisionOutcome !== 'reject' && materialsCost
+            isMaintenance && choice !== 'reject' && materialsCost
               ? Number(materialsCost)
               : undefined,
           labourCost:
-            isMaintenance && decisionOutcome !== 'reject' && labourCost
+            isMaintenance && choice !== 'reject' && labourCost
               ? Number(labourCost)
               : undefined,
           note: decisionNote.trim() || undefined,
@@ -280,7 +242,7 @@ export default function IssuesInboxPage({
       setMaterialsCost('')
       setLabourCost('')
       setDecisionNote('')
-      setDecisionOutcome('accept')
+      setDecisionChoice(isMaintenance ? 'accept_landlord' : 'accept')
       await refresh()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Decision failed')
@@ -308,7 +270,7 @@ export default function IssuesInboxPage({
       {error ? <p className="login-error">{error}</p> : null}
 
       {creating ? (
-        <form className="form-grid" onSubmit={onCreate} style={{ marginBottom: '1.5rem' }}>
+        <form className="form-grid ticket-form-narrow" onSubmit={onCreate}>
           <fieldset className="form-section">
             <legend>New ticket</legend>
             <label className="field field-span">
@@ -338,22 +300,6 @@ export default function IssuesInboxPage({
                 required
               />
             </label>
-            {issueType === 'maintenance' ? (
-              <label className="field field-span">
-                <span className="field-label">
-                  If you are charged for this work, how should it be paid?
-                </span>
-                <select
-                  value={preferredPayment}
-                  onChange={(e) =>
-                    setPreferredPayment(e.target.value as 'invoice' | 'deposit')
-                  }
-                >
-                  <option value="invoice">Invoice me</option>
-                  <option value="deposit">Deduct from my deposit</option>
-                </select>
-              </label>
-            ) : null}
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button type="submit" className="btn btn-primary">
                 Submit
@@ -429,8 +375,13 @@ export default function IssuesInboxPage({
                 {decision.outcome ? (
                   <div className="role-callout role-shared" role="status">
                     <strong>
-                      Decision: {String(decision.outcome)}
-                      {decision.payer ? ` · payer: ${String(decision.payer)}` : ''}
+                      {decision.outcome === 'accept'
+                        ? 'Accepted: landlord pays'
+                        : decision.outcome === 'reject'
+                          ? 'Rejected'
+                          : decision.payer === 'tenant'
+                            ? 'Accepted: tenant pays'
+                            : `Decision: ${String(decision.outcome)}`}
                     </strong>
                     <span>
                       {decision.outcome === 'accept'
@@ -439,14 +390,16 @@ export default function IssuesInboxPage({
                           : 'Ticket accepted. Correspondence is open.'
                         : decision.outcome === 'reject'
                           ? 'Ticket rejected — no further correspondence on this ticket.'
-                          : 'Conditional approval — see payment responsibility in the thread. Correspondence is open.'}
+                          : tenantPayAccepted
+                            ? 'Tenant accepted payment responsibility. Correspondence is open.'
+                            : 'Waiting for the tenant to accept payment responsibility before chat continues.'}
                       {decision.totalCost != null
                         ? ` Total estimated: R${String(decision.totalCost)}.`
                         : ''}
                       {paymentMethod === 'deposit'
                         ? ` Paid from deposit (R${String(decision.depositDeductedAmount ?? '')}).`
                         : paymentMethod === 'invoice'
-                          ? ' Tenant chose to be invoiced.'
+                          ? ' Invoice issued to the tenant.'
                           : ''}
                     </span>
                   </div>
@@ -483,52 +436,24 @@ export default function IssuesInboxPage({
                   </p>
                 ) : null}
 
-                {tenantNeedsPaymentChoice ? (
+                {tenantNeedsPayAck ? (
                   <div className="ticket-close-bar">
                     <p>
                       You are responsible for{' '}
                       {formatMoney(tenantMaintenanceAmount(decision))} on this
-                      maintenance ticket. Choose how to pay:
+                      maintenance ticket. An invoice has been issued. Confirm that you accept
+                      payment responsibility to continue the conversation.
                     </p>
                     <div className="ticket-close-actions">
                       <button
                         type="button"
                         className="btn btn-primary btn-compact"
                         disabled={paying}
-                        onClick={() => void onTenantPayment('invoice')}
+                        onClick={() => void onTenantAcceptPay()}
                       >
-                        Invoice me
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-compact"
-                        disabled={paying}
-                        onClick={() => void onTenantPayment('deposit')}
-                      >
-                        Take from deposit
+                        {paying ? 'Confirming…' : 'I accept that I will pay'}
                       </button>
                     </div>
-                  </div>
-                ) : null}
-
-                {canCreateTicketInvoice ? (
-                  <div className="ticket-close-bar">
-                    <p>
-                      Tenant is responsible for maintenance payment on this ticket
-                      {paymentMethod === 'invoice' ? ' and chose to be invoiced' : ''}. Create an
-                      invoice to bill them.
-                    </p>
-                    <div className="ticket-close-actions">
-                      <button
-                        type="button"
-                        className="btn btn-primary btn-compact"
-                        disabled={invoicing}
-                        onClick={() => void onCreateTicketInvoice()}
-                      >
-                        {invoicing ? 'Creating invoice…' : 'Create maintenance invoice'}
-                      </button>
-                    </div>
-                    {invoiceNotice ? <p className="muted">{invoiceNotice}</p> : null}
                   </div>
                 ) : null}
               </header>
@@ -538,7 +463,8 @@ export default function IssuesInboxPage({
                   const author = String(m.author)
                   const mine = author === myAuthor
                   const isSystem =
-                    /ticket closed|ticket accepted|ticket rejected|ticket approved|correspondence is now open|maintenance accepted|maintenance approved|maintenance request rejected|no work will be carried|chose to|deduct/i.test(
+                    author === 'system' ||
+                    /ticket closed|ticket accepted|ticket rejected|ticket approved|correspondence is now open|maintenance accepted|maintenance approved|maintenance request rejected|no work will be carried|chose to|deduct|invoice|accept responsibility|action required/i.test(
                       String(m.body),
                     )
                   return (
@@ -565,73 +491,36 @@ export default function IssuesInboxPage({
 
               {canDecide ? (
                 <div className="ticket-compose ticket-decision-first">
-                  <form className="form-grid" onSubmit={onDecision}>
+                  <form className="form-grid ticket-form-narrow" onSubmit={onDecision}>
                     <fieldset className="form-section">
                       <legend>Accept or reject ticket</legend>
                       <p className="ticket-decision-intro">
                         Review the request above, then accept to open correspondence, or reject to
                         close the ticket.
                       </p>
-                      <label className="field">
+                      <label className="field field-span">
                         <span className="field-label">Outcome</span>
                         <select
-                          value={decisionOutcome}
+                          value={decisionChoice}
                           onChange={(e) =>
-                            setDecisionOutcome(
-                              e.target.value as 'accept' | 'reject' | 'conditional',
-                            )
+                            setDecisionChoice(e.target.value as DecisionChoice)
                           }
                         >
-                          <option value="accept">
-                            {isMaintenance ? 'Accept (landlord pays)' : 'Accept ticket'}
-                          </option>
-                          <option value="reject">Reject ticket</option>
                           {isMaintenance ? (
-                            <option value="conditional">
-                              Conditional (tenant pays or split)
-                            </option>
-                          ) : null}
+                            <>
+                              <option value="accept_landlord">Accept: landlord pays</option>
+                              <option value="accept_tenant">Accept: tenant pays</option>
+                              <option value="reject">Reject</option>
+                            </>
+                          ) : (
+                            <>
+                              <option value="accept">Accept ticket</option>
+                              <option value="reject">Reject</option>
+                            </>
+                          )}
                         </select>
                       </label>
-                      {isMaintenance && decisionOutcome === 'conditional' ? (
-                        <label className="field">
-                          <span className="field-label">Who pays</span>
-                          <select
-                            value={payer}
-                            onChange={(e) => setPayer(e.target.value as 'tenant' | 'split')}
-                          >
-                            <option value="tenant">Tenant pays</option>
-                            <option value="split">Split costs</option>
-                          </select>
-                        </label>
-                      ) : null}
-                      {isMaintenance &&
-                      decisionOutcome === 'conditional' &&
-                      payer === 'split' ? (
-                        <>
-                          <label className="field">
-                            <span className="field-label">Landlord %</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              value={landlordShare}
-                              onChange={(e) => setLandlordShare(e.target.value)}
-                            />
-                          </label>
-                          <label className="field">
-                            <span className="field-label">Tenant %</span>
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              value={tenantShare}
-                              onChange={(e) => setTenantShare(e.target.value)}
-                            />
-                          </label>
-                        </>
-                      ) : null}
-                      {isMaintenance && decisionOutcome !== 'reject' ? (
+                      {isMaintenance && decisionChoice !== 'reject' ? (
                         <>
                           <label className="field field-span">
                             <span className="field-label">Work description</span>
@@ -648,6 +537,7 @@ export default function IssuesInboxPage({
                               min={0}
                               value={materialsCost}
                               onChange={(e) => setMaterialsCost(e.target.value)}
+                              required={decisionChoice === 'accept_tenant'}
                             />
                           </label>
                           <label className="field">
@@ -657,13 +547,14 @@ export default function IssuesInboxPage({
                               min={0}
                               value={labourCost}
                               onChange={(e) => setLabourCost(e.target.value)}
+                              required={decisionChoice === 'accept_tenant'}
                             />
                           </label>
                         </>
                       ) : null}
                       <label className="field field-span">
                         <span className="field-label">
-                          {decisionOutcome === 'reject' ? 'Rejection note' : 'Note'} (optional)
+                          {decisionChoice === 'reject' ? 'Rejection note' : 'Note'} (optional)
                         </span>
                         <textarea
                           rows={2}
@@ -677,10 +568,10 @@ export default function IssuesInboxPage({
                           className="btn btn-primary"
                           disabled={deciding}
                         >
-                          {decisionOutcome === 'reject'
+                          {decisionChoice === 'reject'
                             ? 'Reject ticket'
-                            : decisionOutcome === 'conditional'
-                              ? 'Approve conditionally'
+                            : decisionChoice === 'accept_tenant'
+                              ? 'Accept: tenant pays'
                               : 'Accept ticket'}
                         </button>
                       </div>
@@ -712,6 +603,10 @@ export default function IssuesInboxPage({
                 ) : awaitingDecision ? (
                   <p className="ticket-awaiting-banner compact">
                     Chat is unavailable until this ticket is accepted.
+                  </p>
+                ) : billable && !tenantPayAccepted ? (
+                  <p className="ticket-awaiting-banner compact">
+                    Chat is unavailable until the tenant accepts payment responsibility.
                   </p>
                 ) : null}
 
