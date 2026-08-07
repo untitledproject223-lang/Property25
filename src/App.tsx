@@ -27,6 +27,7 @@ import LandlordInvoicesPage from './pages/landlord/LandlordInvoicesPage'
 import LandlordApplicationsPage from './pages/landlord/LandlordApplicationsPage'
 import LandlordProfilePage from './pages/landlord/LandlordProfilePage'
 import LandlordUnitsPage from './pages/landlord/LandlordUnitsPage'
+import LandlordTenantsPage from './pages/landlord/LandlordTenantsPage'
 import AgentApplicationsPage from './pages/agent/AgentApplicationsPage'
 import IssuesInboxPage from './pages/shared/IssuesInboxPage'
 import InvoiceViewPage from './pages/shared/InvoiceViewPage'
@@ -158,6 +159,7 @@ export default function App() {
               <Route path="landlord" element={<LandlordShell />}>
                 <Route index element={<LandlordPortfolioPage />} />
                 <Route path="units" element={<LandlordUnitsPage />} />
+                <Route path="tenants" element={<LandlordTenantsPage />} />
                 <Route path="invoices" element={<LandlordInvoicesPage />} />
                 <Route path="applications" element={<LandlordApplicationsPage />} />
                 <Route

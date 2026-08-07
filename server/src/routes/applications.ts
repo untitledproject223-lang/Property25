@@ -4,6 +4,7 @@ import { sql } from '../db/client.js'
 import { requireAuth, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 import { canAccessApplication } from '../lib/applicationAccess.js'
+import { ensureTenantLeaseDocument } from '../lib/ensureTenantLeaseDocument.js'
 import { generateInviteToken } from '../lib/inviteToken.js'
 import { inviteLink } from '../lib/publicUrl.js'
 
@@ -40,6 +41,19 @@ const SIGN_TEXT_KEYS = [
   'signAgentName',
   'signAgentDate',
   'signAgentMark',
+  'inspectionTenantName',
+  'inspectionTenantDate',
+  'inspectionTenantMark',
+  'inspectionLandlordName',
+  'inspectionLandlordDate',
+  'inspectionLandlordMark',
+  'inspectionAgentName',
+  'inspectionAgentDate',
+  'inspectionAgentMark',
+  'leaseDocumentHtml',
+  'leaseDocumentGeneratedAt',
+  'leaseDocumentMode',
+  'leasePdfDataUrl',
 ] as const
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -265,12 +279,15 @@ applicationsRouter.post('/', async (req, res, next) => {
     }
 
     const apt = await sql`
-      SELECT a.id, a.landlord_id
+      SELECT a.id, a.landlord_id, a.deleted_at
       FROM apartments a
       WHERE a.id = ${body.apartmentId} AND a.org_id = ${auth.orgId}
       LIMIT 1
     `
     if (apt.length === 0) throw new AppError(400, 'apartmentId not found in this org')
+    if (apt[0].deleted_at) {
+      throw new AppError(400, 'This unit has been deleted and cannot be used for new applications')
+    }
 
     if (auth.role === 'landlord') {
       const owned = await sql`
@@ -389,6 +406,52 @@ applicationsRouter.get('/:id', async (req, res, next) => {
         payloadUpdatedAt: payload[0]?.payloadUpdatedAt ?? null,
       },
     })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Download the signed lease once the application is complete (all parties). */
+applicationsRouter.get('/:id/lease', async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    if (!(await canAccessApplication(req.auth!, id))) {
+      throw new AppError(404, 'Application not found')
+    }
+
+    const app = await sql`
+      SELECT a.id, a.status, p.completed_stages AS "completedStages"
+      FROM applications a
+      LEFT JOIN application_payloads p ON p.application_id = a.id
+      WHERE a.id = ${id} AND a.org_id = ${req.orgId!}
+      LIMIT 1
+    `
+    if (app.length === 0) throw new AppError(404, 'Application not found')
+
+    const completedStages = Array.isArray(app[0].completedStages)
+      ? (app[0].completedStages as string[])
+      : []
+    const complete =
+      String(app[0].status) === 'tenant' || completedStages.includes('success')
+    if (!complete) {
+      throw new AppError(400, 'Lease download is available after the application is complete')
+    }
+
+    const tenant = await sql`
+      SELECT id FROM tenants
+      WHERE application_id = ${id} AND org_id = ${req.orgId!}
+      ORDER BY
+        CASE WHEN status IN ('active', 'notice') THEN 0 ELSE 1 END,
+        updated_at DESC NULLS LAST
+      LIMIT 1
+    `
+
+    const doc = await ensureTenantLeaseDocument({
+      orgId: req.orgId!,
+      tenantId: tenant[0]?.id ? String(tenant[0].id) : null,
+      applicationId: id,
+    })
+    res.json({ data: doc })
   } catch (err) {
     next(err)
   }

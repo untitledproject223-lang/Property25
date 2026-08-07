@@ -113,5 +113,15 @@ export async function ensureCriticalSchema() {
     ON CONFLICT (id) DO NOTHING
   `)
 
-  console.log('schema: deposit_balance + lease termination + managing agent + unit finance ready')
+  await sql.query(`
+    ALTER TABLE apartments
+      ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ
+  `)
+  await sql.query(`
+    INSERT INTO schema_migrations (id)
+    VALUES ('014_apartment_soft_delete.sql')
+    ON CONFLICT (id) DO NOTHING
+  `)
+
+  console.log('schema: deposit_balance + lease termination + managing agent + unit finance + soft delete ready')
 }

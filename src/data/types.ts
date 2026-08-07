@@ -40,11 +40,13 @@ export interface Apartment {
   landlordId: string
   nextDueDate?: string
   ticketManager?: 'landlord' | 'agent'
+  leaseConfig?: Record<string, unknown> | null
 }
 
 export interface Tenant {
   id: string
   apartmentId: string
+  applicationId?: string | null
   name: string
   email: string
   phone: string
@@ -53,6 +55,9 @@ export interface Tenant {
   leaseEnd: string
   status: TenantStatus
   balance: number
+  terminationReason?: string | null
+  depositPaidOut?: boolean | null
+  terminatedAt?: string | null
   docs?: {
     leaseFile?: string
     idDoc?: string

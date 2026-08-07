@@ -28,8 +28,10 @@
     "express": "^5.1.0",
     "express-rate-limit": "^8.6.1",
     "helmet": "^8.1.0",
+    "html-pdf-lite": "^1.2.2",
     "jose": "^6.2.4",
     "morgan": "^1.10.0",
+    "pdf-lib": "^1.17.1",
     "typescript": "^5.8.3",
     "zod": "^3.25.28"
   },

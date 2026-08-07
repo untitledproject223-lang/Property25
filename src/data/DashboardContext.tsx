@@ -81,6 +81,11 @@ function normalizeDashboard(raw: DashboardState): DashboardState {
       leaseEnd: String(t.leaseEnd).slice(0, 10),
       docs: t.docs ?? undefined,
       moveInInspection: t.moveInInspection ?? undefined,
+      terminationReason: t.terminationReason ?? null,
+      depositPaidOut: t.depositPaidOut ?? null,
+      terminatedAt: t.terminatedAt
+        ? String(t.terminatedAt).slice(0, 10)
+        : null,
     })),
     payments: (raw.payments ?? []).map((p) => ({
       ...p,
@@ -146,6 +151,7 @@ export interface UnitInput {
   municipal?: number | null
   purchasePrice?: number | null
   bankOwed?: number | null
+  leaseConfig?: Record<string, unknown> | null
 }
 
 export interface BuildingInput {
@@ -436,6 +442,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         municipal: input.municipal ?? null,
         purchasePrice: input.purchasePrice ?? null,
         bankOwed: input.bankOwed ?? null,
+        leaseConfig: input.leaseConfig ?? null,
       })
       await refresh()
       const row = result.data
@@ -451,6 +458,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         landlordId: String(row.landlord_id ?? input.landlordId),
         status: (row.status as Apartment['status']) ?? input.status ?? 'vacant',
         nextDueDate: input.nextDueDate,
+        leaseConfig: (row.leaseConfig as Apartment['leaseConfig']) ?? input.leaseConfig ?? null,
       }
     },
     [refresh],
@@ -466,6 +474,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         deposit: input.deposit,
         status: input.status,
         nextDueDate: input.nextDueDate === undefined ? undefined : input.nextDueDate || null,
+        leaseConfig: input.leaseConfig,
       })
       await refresh()
     },
@@ -474,9 +483,6 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
 
   const deleteUnit = useCallback(
     async (id: string) => {
-      if (!isUnitVacant(id, state.tenants)) {
-        return { ok: false, error: 'Only vacant (unassigned) units can be deleted.' }
-      }
       try {
         await deleteApartment(id)
         await refresh()
@@ -488,12 +494,27 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [refresh, state.tenants],
+    [refresh],
   )
 
   const completeApplication = useCallback(
     async (input: CompleteApplicationInput): Promise<Tenant | null> => {
-      if (!isUnitVacant(input.apartmentId, state.tenants)) return null
+      // Prefer an existing tenant for this application (active or already created).
+      if (input.applicationId) {
+        const existing = state.tenants.find(
+        (t) => t.applicationId && t.applicationId === input.applicationId,
+      )
+        if (existing) return existing
+      }
+
+      if (!isUnitVacant(input.apartmentId, state.tenants)) {
+        const current = state.tenants.find(
+          (t) =>
+            t.apartmentId === input.apartmentId &&
+            (t.status === 'active' || t.status === 'notice'),
+        )
+        return current ?? null
+      }
       const apartment = state.apartments.find((a) => a.id === input.apartmentId)
       if (!apartment) return null
 
@@ -527,7 +548,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
         whatsapp: (row.whatsapp as string | undefined) ?? undefined,
         leaseStart: String(row.lease_start ?? row.leaseStart ?? input.leaseStart).slice(0, 10),
         leaseEnd: String(row.lease_end ?? row.leaseEnd ?? input.leaseEnd).slice(0, 10),
-        status: 'active',
+        status: (String(row.status ?? 'active') as Tenant['status']) || 'active',
         balance: 0,
         moveInInspection: input.moveInSummary
           ? {

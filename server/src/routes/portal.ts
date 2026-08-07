@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { sql } from '../db/client.js'
+import { leaseConfigSchema } from '../leaseConfig.js'
+import { softDeleteApartment } from '../lib/softDeleteApartment.js'
 import { generateInviteToken, hashInviteToken } from '../lib/inviteToken.js'
 import { unitAgentInviteLink } from '../lib/publicUrl.js'
 import { requireAuth, requireTenant, requireLandlord, requireAgent } from '../middleware/auth.js'
@@ -106,11 +108,23 @@ portalRouter.get('/tenant/stays/:id', requireTenant, async (req, res, next) => {
         ORDER BY paid_at DESC
       `,
       sql`
-        SELECT id, doc_type AS "docType", file_name AS "fileName",
-          mime_type AS "mimeType", created_at AS "createdAt"
-        FROM documents
-        WHERE tenant_id = ${id} AND org_id = ${req.orgId!}
-        ORDER BY created_at DESC
+        SELECT
+          d.id,
+          d.doc_type AS "docType",
+          d.filename AS "fileName",
+          d.filename,
+          d.mime_type AS "mimeType",
+          d.created_at AS "createdAt"
+        FROM documents d
+        WHERE d.org_id = ${req.orgId!}
+          AND (
+            d.tenant_id = ${id}
+            OR (
+              d.tenant_id IS NULL
+              AND d.application_id = (SELECT application_id FROM tenants WHERE id = ${id})
+            )
+          )
+        ORDER BY d.created_at DESC
       `,
       sql`
         SELECT id, subject, status, severity, audience, issue_type AS "issueType",
@@ -314,6 +328,7 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         a.municipal::float8 AS municipal,
         a.purchase_price::float8 AS "purchasePrice",
         a.bank_owed::float8 AS "bankOwed",
+        a.lease_config AS "leaseConfig",
         ma.full_name AS "managingAgentName",
         ma.email AS "managingAgentEmail",
         b.name AS "buildingName",
@@ -333,10 +348,28 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
       FROM apartments a
       JOIN buildings b ON b.id = a.building_id
       LEFT JOIN users ma ON ma.id = a.managing_agent_id
-      LEFT JOIN tenants t ON t.apartment_id = a.id
-        AND t.status IN ('active', 'notice')
-        AND t.application_id IS NOT NULL
+      LEFT JOIN LATERAL (
+        SELECT
+          tn.id,
+          tn.name,
+          tn.email,
+          tn.phone,
+          tn.status,
+          tn.balance,
+          tn.lease_start,
+          tn.lease_end
+        FROM tenants tn
+        WHERE tn.apartment_id = a.id
+          AND tn.status IN ('active', 'notice')
+          AND tn.application_id IS NOT NULL
+        ORDER BY
+          CASE WHEN tn.status = 'active' THEN 0 ELSE 1 END,
+          tn.updated_at DESC NULLS LAST,
+          tn.created_at DESC NULLS LAST
+        LIMIT 1
+      ) t ON true
       WHERE a.landlord_id = ${landlordId} AND a.org_id = ${req.orgId!}
+        AND a.deleted_at IS NULL
       ORDER BY
         CASE WHEN t.id IS NULL THEN 1 ELSE 0 END,
         t.name NULLS LAST,
@@ -344,10 +377,35 @@ portalRouter.get('/landlord/portfolio', requireLandlord, async (req, res, next) 
         a.unit_number
     `
 
+    const previousUnits = await sql`
+      SELECT
+        a.id,
+        a.unit_number AS "unitNumber",
+        a.rent::float8 AS rent,
+        a.deposit::float8 AS deposit,
+        COALESCE(a.deposit_balance, a.deposit)::float8 AS "depositBalance",
+        a.status,
+        a.deleted_at AS "deletedAt",
+        a.postal_code AS "postalCode",
+        a.levies::float8 AS levies,
+        a.municipal::float8 AS municipal,
+        a.purchase_price AS "purchasePrice",
+        a.bank_owed AS "bankOwed",
+        b.name AS "buildingName",
+        b.address AS "buildingAddress"
+      FROM apartments a
+      JOIN buildings b ON b.id = a.building_id
+      WHERE a.landlord_id = ${landlordId}
+        AND a.org_id = ${req.orgId!}
+        AND a.deleted_at IS NOT NULL
+      ORDER BY a.deleted_at DESC NULLS LAST, b.name, a.unit_number
+    `
+
     res.json({
       data: {
         landlord: landlord[0],
         units,
+        previousUnits,
       },
     })
   } catch (err) {
@@ -432,6 +490,7 @@ portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => 
         municipal: z.number().nonnegative().optional().nullable(),
         purchasePrice: z.number().nonnegative().optional().nullable(),
         bankOwed: z.number().nonnegative().optional().nullable(),
+        leaseConfig: leaseConfigSchema.optional().nullable(),
       })
       .parse(req.body)
 
@@ -463,23 +522,52 @@ portalRouter.post('/landlord/units', requireLandlord, async (req, res, next) => 
     `
     if (building.length === 0) throw new AppError(400, 'Building not found')
 
+    const leaseConfigJson = body.leaseConfig ? JSON.stringify(body.leaseConfig) : null
+
     const rows = await sql`
       INSERT INTO apartments (
         org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status,
-        postal_code, levies, municipal, purchase_price, bank_owed
+        postal_code, levies, municipal, purchase_price, bank_owed, lease_config
       )
       VALUES (
         ${req.orgId!}, ${buildingId}, ${landlordId}, ${body.unitNumber.trim()},
         ${body.rent}, ${body.deposit}, ${body.deposit}, 'vacant',
         ${body.postalCode ?? null}, ${body.levies ?? null}, ${body.municipal ?? null},
-        ${body.purchasePrice ?? null}, ${body.bankOwed ?? null}
+        ${body.purchasePrice ?? null}, ${body.bankOwed ?? null},
+        ${leaseConfigJson}::jsonb
       )
       RETURNING id, unit_number AS "unitNumber", rent::float8 AS rent,
         deposit::float8 AS deposit, status, building_id AS "buildingId",
-        landlord_id AS "landlordId"
+        landlord_id AS "landlordId", lease_config AS "leaseConfig"
     `
 
     res.status(201).json({ data: rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Landlord: soft-delete one of their units */
+portalRouter.delete('/landlord/units/:id', requireLandlord, async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const owned = await sql`
+      SELECT a.id
+      FROM apartments a
+      JOIN landlords l ON l.id = a.landlord_id
+      WHERE a.id = ${id}
+        AND a.org_id = ${req.orgId!}
+        AND l.user_id = ${req.auth!.sub}
+      LIMIT 1
+    `
+    if (owned.length === 0) throw new AppError(404, 'Unit not found')
+
+    const deleted = await softDeleteApartment({
+      apartmentId: id,
+      orgId: req.orgId!,
+      actor: 'landlord',
+    })
+    res.json({ data: deleted })
   } catch (err) {
     next(err)
   }
@@ -496,6 +584,7 @@ portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, r
         municipal: z.number().nonnegative().optional().nullable(),
         purchasePrice: z.number().nonnegative().optional().nullable(),
         bankOwed: z.number().nonnegative().optional().nullable(),
+        leaseConfig: leaseConfigSchema.optional().nullable(),
       })
       .parse(req.body)
 
@@ -506,7 +595,9 @@ portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, r
         a.levies,
         a.municipal,
         a.purchase_price,
-        a.bank_owed
+        a.bank_owed,
+        a.lease_config,
+        a.deleted_at
       FROM apartments a
       JOIN landlords l ON l.id = a.landlord_id
       WHERE a.id = ${id}
@@ -515,6 +606,9 @@ portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, r
       LIMIT 1
     `
     if (existing.length === 0) throw new AppError(404, 'Unit not found')
+    if (existing[0].deleted_at) {
+      throw new AppError(400, 'This unit has been deleted and cannot be edited')
+    }
 
     const current = existing[0]
     const postalCode =
@@ -524,6 +618,14 @@ portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, r
     const purchasePrice =
       body.purchasePrice !== undefined ? body.purchasePrice : current.purchase_price
     const bankOwed = body.bankOwed !== undefined ? body.bankOwed : current.bank_owed
+    const leaseConfigJson =
+      body.leaseConfig !== undefined
+        ? body.leaseConfig
+          ? JSON.stringify(body.leaseConfig)
+          : null
+        : current.lease_config != null
+          ? JSON.stringify(current.lease_config)
+          : null
 
     const rows = await sql`
       UPDATE apartments
@@ -533,6 +635,7 @@ portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, r
         municipal = ${municipal},
         purchase_price = ${purchasePrice},
         bank_owed = ${bankOwed},
+        lease_config = ${leaseConfigJson}::jsonb,
         updated_at = now()
       WHERE id = ${id} AND org_id = ${req.orgId!}
       RETURNING
@@ -542,7 +645,8 @@ portalRouter.patch('/landlord/units/:id/details', requireLandlord, async (req, r
         levies::float8 AS levies,
         municipal::float8 AS municipal,
         purchase_price::float8 AS "purchasePrice",
-        bank_owed::float8 AS "bankOwed"
+        bank_owed::float8 AS "bankOwed",
+        lease_config AS "leaseConfig"
     `
 
     res.json({ data: rows[0] })
@@ -614,6 +718,47 @@ portalRouter.get('/landlord/tenants', requireLandlord, async (req, res, next) =>
   }
 })
 
+/** Landlord: previous / terminated tenants (lease history) */
+portalRouter.get('/landlord/tenant-history', requireLandlord, async (req, res, next) => {
+  try {
+    const rows = await sql`
+      SELECT
+        t.id,
+        t.name,
+        t.email,
+        t.phone,
+        t.status,
+        t.balance::float8 AS balance,
+        t.lease_start AS "leaseStart",
+        t.lease_end AS "leaseEnd",
+        t.termination_reason AS "terminationReason",
+        t.deposit_paid_out AS "depositPaidOut",
+        t.terminated_at AS "terminatedAt",
+        a.id AS "apartmentId",
+        a.unit_number AS "unitNumber",
+        a.rent::float8 AS rent,
+        a.deposit::float8 AS deposit,
+        COALESCE(a.deposit_balance, a.deposit)::float8 AS "depositBalance",
+        b.name AS "buildingName",
+        b.address AS "buildingAddress"
+      FROM tenants t
+      JOIN apartments a ON a.id = t.apartment_id
+      JOIN buildings b ON b.id = a.building_id
+      JOIN landlords l ON l.id = a.landlord_id
+      WHERE l.user_id = ${req.auth!.sub}
+        AND t.org_id = ${req.orgId!}
+        AND t.status = 'former'
+        AND t.application_id IS NOT NULL
+      ORDER BY
+        COALESCE(t.terminated_at, t.lease_end) DESC NULLS LAST,
+        t.name ASC
+    `
+    res.json({ data: rows })
+  } catch (err) {
+    next(err)
+  }
+})
+
 const terminateLeaseSchema = z.object({
   reason: z.string().min(1).max(2000),
   depositPaidOut: z.boolean(),
@@ -651,11 +796,19 @@ portalRouter.post(
         SET
           status = 'former',
           lease_end = ${body.terminationDate},
-          termination_reason = ${body.reason.trim()},
-          deposit_paid_out = ${body.depositPaidOut},
+          termination_reason = CASE
+            WHEN id = ${id} THEN ${body.reason.trim()}
+            ELSE COALESCE(termination_reason, ${body.reason.trim()})
+          END,
+          deposit_paid_out = CASE
+            WHEN id = ${id} THEN ${body.depositPaidOut}
+            ELSE deposit_paid_out
+          END,
           terminated_at = ${body.terminationDate},
           updated_at = now()
-        WHERE id = ${id} AND org_id = ${req.orgId!}
+        WHERE org_id = ${req.orgId!}
+          AND apartment_id = ${apartmentId}
+          AND (id = ${id} OR status IN ('active', 'notice'))
         RETURNING id, apartment_id AS "apartmentId", name, status,
           lease_end AS "leaseEnd",
           termination_reason AS "terminationReason",
@@ -675,7 +828,29 @@ portalRouter.post(
         WHERE id = ${apartmentId} AND org_id = ${req.orgId!}
       `
 
-      res.json({ data: rows[0] })
+      const closedTenantIds = rows.map((r) => String(r.id))
+      if (closedTenantIds.length > 0) {
+        await sql`
+          UPDATE issues
+          SET
+            status = 'resolved',
+            updated_at = now(),
+            messages_json = COALESCE(messages_json, '[]'::jsonb) || ${JSON.stringify([
+              {
+                id: crypto.randomUUID(),
+                author: 'landlord',
+                body: 'Ticket closed automatically because the lease was terminated.',
+                at: new Date().toISOString(),
+              },
+            ])}::jsonb
+          WHERE org_id = ${req.orgId!}
+            AND tenant_id = ANY(${closedTenantIds}::uuid[])
+            AND status IN ('open', 'pending')
+        `
+      }
+
+      const primary = rows.find((r) => String(r.id) === id) ?? rows[0]
+      res.json({ data: primary })
     } catch (err) {
       next(err)
     }

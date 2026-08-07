@@ -1,7 +1,9 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { sql } from '../db/client.js'
-import { requireAuth } from '../middleware/auth.js'
+import { softDeleteApartment } from '../lib/softDeleteApartment.js'
+import { leaseConfigSchema } from '../leaseConfig.js'
+import { requireAuth, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 
 export const apartmentsRouter = Router()
@@ -9,17 +11,40 @@ apartmentsRouter.use(requireAuth)
 
 apartmentsRouter.get('/', async (req, res, next) => {
   try {
-    const rows = await sql`
-      SELECT
-        a.id, a.org_id, a.building_id, a.landlord_id,
-        a.unit_number, a.rent, a.deposit, a.status, a.next_due_date,
-        a.created_at, a.updated_at,
-        b.name AS building_name
-      FROM apartments a
-      JOIN buildings b ON b.id = a.building_id
-      WHERE a.org_id = ${req.orgId!}
-      ORDER BY b.name ASC, a.unit_number ASC
-    `
+    const scope = String(req.query.scope ?? 'current')
+    const previous = scope === 'previous'
+    const rows = previous
+      ? await sql`
+          SELECT
+            a.id, a.org_id, a.building_id, a.landlord_id,
+            a.unit_number, a.rent, a.deposit, a.status, a.next_due_date,
+            a.lease_config AS "leaseConfig",
+            a.deleted_at AS "deletedAt",
+            a.created_at, a.updated_at,
+            b.name AS building_name,
+            b.address AS building_address,
+            l.name AS landlord_name
+          FROM apartments a
+          JOIN buildings b ON b.id = a.building_id
+          JOIN landlords l ON l.id = a.landlord_id
+          WHERE a.org_id = ${req.orgId!}
+            AND a.deleted_at IS NOT NULL
+          ORDER BY a.deleted_at DESC NULLS LAST, b.name ASC, a.unit_number ASC
+        `
+      : await sql`
+          SELECT
+            a.id, a.org_id, a.building_id, a.landlord_id,
+            a.unit_number, a.rent, a.deposit, a.status, a.next_due_date,
+            a.lease_config AS "leaseConfig",
+            a.deleted_at AS "deletedAt",
+            a.created_at, a.updated_at,
+            b.name AS building_name
+          FROM apartments a
+          JOIN buildings b ON b.id = a.building_id
+          WHERE a.org_id = ${req.orgId!}
+            AND a.deleted_at IS NULL
+          ORDER BY b.name ASC, a.unit_number ASC
+        `
     res.json({ data: rows })
   } catch (err) {
     next(err)
@@ -39,6 +64,7 @@ const createApartmentSchema = z.object({
   municipal: z.number().nonnegative().optional().nullable(),
   purchasePrice: z.number().nonnegative().optional().nullable(),
   bankOwed: z.number().nonnegative().optional().nullable(),
+  leaseConfig: leaseConfigSchema.optional().nullable(),
 })
 
 apartmentsRouter.post('/', async (req, res, next) => {
@@ -55,19 +81,23 @@ apartmentsRouter.post('/', async (req, res, next) => {
     `
     if (landlord.length === 0) throw new AppError(400, 'landlordId not found in this org')
 
+    const leaseConfigJson = body.leaseConfig ? JSON.stringify(body.leaseConfig) : null
+
     const rows = await sql`
       INSERT INTO apartments (
         org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance, status,
-        next_due_date, postal_code, levies, municipal, purchase_price, bank_owed
+        next_due_date, postal_code, levies, municipal, purchase_price, bank_owed, lease_config
       )
       VALUES (
         ${req.orgId!}, ${body.buildingId}, ${body.landlordId}, ${body.unitNumber},
         ${body.rent}, ${body.deposit}, ${body.deposit}, ${body.status}, ${body.nextDueDate ?? null},
         ${body.postalCode ?? null}, ${body.levies ?? null}, ${body.municipal ?? null},
-        ${body.purchasePrice ?? null}, ${body.bankOwed ?? null}
+        ${body.purchasePrice ?? null}, ${body.bankOwed ?? null},
+        ${leaseConfigJson}::jsonb
       )
       RETURNING id, org_id, building_id, landlord_id, unit_number, rent, deposit, deposit_balance,
         status, next_due_date, postal_code, levies, municipal, purchase_price, bank_owed,
+        lease_config AS "leaseConfig",
         created_at, updated_at
     `
     res.status(201).json({ data: rows[0] })
@@ -253,7 +283,9 @@ apartmentsRouter.get('/:id', async (req, res, next) => {
   try {
     const id = z.string().uuid().parse(req.params.id)
     const rows = await sql`
-      SELECT id, org_id, building_id, landlord_id, unit_number, rent, deposit, status, next_due_date, created_at, updated_at
+      SELECT id, org_id, building_id, landlord_id, unit_number, rent, deposit, status, next_due_date,
+        lease_config AS "leaseConfig",
+        created_at, updated_at
       FROM apartments
       WHERE id = ${id} AND org_id = ${req.orgId!}
       LIMIT 1
@@ -273,6 +305,7 @@ const updateApartmentSchema = z.object({
   deposit: z.number().nonnegative().optional(),
   status: z.enum(['vacant', 'occupied', 'notice']).optional(),
   nextDueDate: z.string().date().nullable().optional(),
+  leaseConfig: leaseConfigSchema.optional().nullable(),
 })
 
 apartmentsRouter.patch('/:id', async (req, res, next) => {
@@ -284,6 +317,9 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
       SELECT * FROM apartments WHERE id = ${id} AND org_id = ${req.orgId!} LIMIT 1
     `
     if (existing.length === 0) throw new AppError(404, 'Apartment not found')
+    if (existing[0].deleted_at) {
+      throw new AppError(400, 'This unit has been deleted and cannot be edited')
+    }
 
     const buildingId = body.buildingId ?? existing[0].building_id
     const landlordId = body.landlordId ?? existing[0].landlord_id
@@ -298,6 +334,15 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
         ? Number(nextDeposit)
         : oldBalance
 
+    const leaseConfigJson =
+      body.leaseConfig !== undefined
+        ? body.leaseConfig
+          ? JSON.stringify(body.leaseConfig)
+          : null
+        : existing[0].lease_config != null
+          ? JSON.stringify(existing[0].lease_config)
+          : null
+
     const rows = await sql`
       UPDATE apartments
       SET
@@ -311,12 +356,14 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
         next_due_date = ${
           body.nextDueDate !== undefined ? body.nextDueDate : existing[0].next_due_date
         },
+        lease_config = ${leaseConfigJson}::jsonb,
         updated_at = now()
       WHERE id = ${id} AND org_id = ${req.orgId!}
       RETURNING id, building_id AS "buildingId", landlord_id AS "landlordId",
         unit_number AS "unitNumber", rent::float8 AS rent, deposit::float8 AS deposit,
         deposit_balance::float8 AS "depositBalance",
-        status, next_due_date AS "nextDueDate"
+        status, next_due_date AS "nextDueDate",
+        lease_config AS "leaseConfig"
     `
     res.json({ data: rows[0] })
   } catch (err) {
@@ -324,21 +371,15 @@ apartmentsRouter.patch('/:id', async (req, res, next) => {
   }
 })
 
-apartmentsRouter.delete('/:id', async (req, res, next) => {
+apartmentsRouter.delete('/:id', requireAgent, async (req, res, next) => {
   try {
     const id = z.string().uuid().parse(req.params.id)
-    const linked = await sql`
-      SELECT id FROM tenants WHERE apartment_id = ${id} AND org_id = ${req.orgId!} LIMIT 1
-    `
-    if (linked.length > 0) {
-      throw new AppError(400, 'Only vacant (unassigned) units can be deleted.')
-    }
-    const rows = await sql`
-      DELETE FROM apartments WHERE id = ${id} AND org_id = ${req.orgId!}
-      RETURNING id
-    `
-    if (rows.length === 0) throw new AppError(404, 'Apartment not found')
-    res.json({ data: { id: rows[0].id } })
+    const deleted = await softDeleteApartment({
+      apartmentId: id,
+      orgId: req.orgId!,
+      actor: 'agent',
+    })
+    res.json({ data: deleted })
   } catch (err) {
     next(err)
   }

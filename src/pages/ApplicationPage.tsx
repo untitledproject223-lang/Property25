@@ -54,10 +54,36 @@ const SHARED_SYNC_KEYS = [
   'moveinNextAgent',
 ] as const
 
+const SHARED_MARK_KEYS = [
+  'signApplicantMark',
+  'signApplicantDate',
+  'signApplicantName',
+  'signLandlordMark',
+  'signLandlordDate',
+  'signLandlordName',
+  'inspectionTenantMark',
+  'inspectionTenantDate',
+  'inspectionTenantName',
+  'inspectionLandlordMark',
+  'inspectionLandlordDate',
+  'inspectionLandlordName',
+  'inspectionAgentMark',
+  'inspectionAgentDate',
+  'inspectionAgentName',
+  'leaseDocumentHtml',
+  'leaseDocumentGeneratedAt',
+  'leaseDocumentMode',
+  'leasePdfDataUrl',
+] as const
+
 type SharedSyncKey = (typeof SHARED_SYNC_KEYS)[number]
 
 function isSharedSyncKey(key: string): key is SharedSyncKey {
   return (SHARED_SYNC_KEYS as readonly string[]).includes(key)
+}
+
+function isSharedMarkKey(key: string): boolean {
+  return (SHARED_MARK_KEYS as readonly string[]).includes(key)
 }
 
 function mergeSharedFlags(
@@ -67,6 +93,12 @@ function mergeSharedFlags(
   const merged = { ...local, ...remote }
   for (const key of SHARED_SYNC_KEYS) {
     merged[key] = isDoneFlag(local[key]) || isDoneFlag(remote[key])
+  }
+  for (const key of SHARED_MARK_KEYS) {
+    const next = remote[key]
+    const prev = local[key]
+    if (typeof next === 'string' && next.trim()) merged[key] = next
+    else if (typeof prev === 'string' && prev.trim()) merged[key] = prev
   }
   return merged
 }
@@ -324,6 +356,11 @@ export default function ApplicationPage() {
         const data = result.data
         const form = (data.formData ?? {}) as Record<string, unknown>
         const stages = (data.completedStages ?? []) as string[]
+        const assignedAgentId =
+          data.assigned_agent_id ?? data.assignedAgentId ?? null
+        const inferredLandlordLed =
+          String(form.initiatedBy ?? '') === 'landlord' ||
+          (!form.initiatedBy && !assignedAgentId)
         const nextForm = {
           ...createInitialFormData(user),
           ...form,
@@ -332,6 +369,7 @@ export default function ApplicationPage() {
           applicantEmail: form.applicantEmail ?? data.applicant_email ?? data.applicantEmail,
           applicantPhone: form.applicantPhone ?? data.applicant_phone ?? data.applicantPhone,
           apartmentId: form.apartmentId ?? data.apartment_id ?? data.apartmentId,
+          ...(inferredLandlordLed ? { initiatedBy: 'landlord' as const } : {}),
         }
         const validIds = new Set(STAGES.map((s) => s.id))
         const nextCompleted = new Set(
@@ -340,6 +378,10 @@ export default function ApplicationPage() {
         setFormData(nextForm)
         setCompleted(nextCompleted)
         setCurrentIndex(activeStageIndex(nextCompleted, nextForm))
+        const existingTenantId = asString(
+          (nextForm as Record<string, unknown>).tenantId ?? form.tenantId,
+        )
+        if (existingTenantId) setAssignedTenantId(existingTenantId)
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Could not load application')
@@ -388,13 +430,23 @@ export default function ApplicationPage() {
   }
 
   function updateField(key: string, value: unknown) {
-    // Allow landlord profile seeding even before the inquiry step unlocks.
-    const seedKeys = new Set(['landlordId', 'landlordName', 'initiatedBy'])
-    if (!editable && !seedKeys.has(key)) return
+    // Allow landlord profile seeding / lease document snapshot even before unlock.
+    const seedKeys = new Set([
+      'landlordId',
+      'landlordName',
+      'initiatedBy',
+      'unitLeaseConfig',
+      'leaseDocumentHtml',
+      'leaseDocumentGeneratedAt',
+      'leaseDocumentMode',
+      'leasePdfDataUrl',
+      'leasePdf',
+    ])
+    if (!editable && !seedKeys.has(key) && !isSharedMarkKey(key) && !isSharedSyncKey(key)) return
     setFormData((prev) => {
       const next = { ...prev, [key]: value }
       formDataRef.current = next
-      if (isSharedSyncKey(key)) {
+      if (isSharedSyncKey(key) || isSharedMarkKey(key)) {
         if (sharedSaveTimer.current) window.clearTimeout(sharedSaveTimer.current)
         sharedSaveTimer.current = window.setTimeout(() => {
           void persistSharedFlags(formDataRef.current)
@@ -416,12 +468,12 @@ export default function ApplicationPage() {
     const email = asString(data.applicantEmail).trim()
     const phone = asString(data.applicantPhone).trim()
     if (!name || !email) {
-      throw new Error('Applicant name and email are required before continuing.')
+      throw new Error('Please complete all required fields before continuing.')
     }
 
     const apartmentId = asString(data.apartmentId) || null
     if (!apartmentId) {
-      throw new Error('Select a unit before starting the application.')
+      throw new Error('Please complete all required fields before continuing.')
     }
     const result = await createApplication({
       apartmentId,
@@ -448,7 +500,14 @@ export default function ApplicationPage() {
     return id
   }
 
+  function hasUploadedFiles(key: string): boolean {
+    const value = formData[key]
+    if (Array.isArray(value)) return value.some((item) => String(item ?? '').trim())
+    return Boolean(asString(value).trim())
+  }
+
   function validateCurrentStage(): string | null {
+    const requiredMessage = 'Please complete all required fields before continuing.'
     if (!editable) {
       return holders
         ? `Waiting on ${formatPartyList(holders.waitingOn)} to finish Stage ${holders.stage.number} (${holders.stage.shortTitle}).`
@@ -456,10 +515,23 @@ export default function ApplicationPage() {
     }
     if (currentStage.id === 'inquiry') {
       if (!asString(formData.apartmentId)) {
-        return 'Select a unit before continuing.'
+        return requiredMessage
       }
-      if (!asString(formData.applicantName).trim() || !asString(formData.applicantEmail).trim()) {
-        return 'Applicant name and email are required before continuing.'
+      if (!asString(formData.moveInDate).trim() || !asString(formData.agreementTerm).trim()) {
+        return requiredMessage
+      }
+      if (
+        asString(formData.agreementTerm) === 'other' &&
+        !asString(formData.termEndDate).trim()
+      ) {
+        return requiredMessage
+      }
+      if (
+        !asString(formData.applicantName).trim() ||
+        !asString(formData.applicantEmail).trim() ||
+        !asString(formData.applicantPhone).trim()
+      ) {
+        return requiredMessage
       }
       if (Number(asString(formData.occupantCount) || '1') >= 2) {
         if (
@@ -467,8 +539,32 @@ export default function ApplicationPage() {
           !asString(formData.applicant2Email).trim() ||
           !asString(formData.applicant2Phone).trim()
         ) {
-          return 'Second applicant full name, email, and phone are required when there are 2 applicants.'
+          return requiredMessage
         }
+      }
+      if (!landlordLed && !asString(formData.landlordId).trim()) {
+        return requiredMessage
+      }
+    }
+    if (currentStage.id === 'documents') {
+      if (
+        !asString(formData.grossSalary).trim() ||
+        !asString(formData.employer).trim() ||
+        !asString(formData.employmentStatus).trim()
+      ) {
+        return requiredMessage
+      }
+      if (!boolFlag(formData.creditCheckConsent) || !boolFlag(formData.docsSubmitted)) {
+        return requiredMessage
+      }
+    }
+    if (currentStage.id === 'kycFees') {
+      if (
+        !asString(formData.kycFeePaymentMethod).trim() ||
+        !hasUploadedFiles('kycFeeProofOfPayment') ||
+        !boolFlag(formData.kycFeePaymentConfirmed)
+      ) {
+        return requiredMessage
       }
     }
     if (currentStage.id === 'kyc') {
@@ -476,24 +572,28 @@ export default function ApplicationPage() {
         return 'This application was rejected based on affordability. It cannot continue.'
       }
       if (!boolFlag(formData.kycAffordabilityApproved) && landlordLed) {
-        return 'Approve the income & expenses outcome before continuing to KYC.'
+        return requiredMessage
       }
       if (landlordLed) {
         if (!boolFlag(formData.landlordKycApproved) && !boolFlag(formData.tenantKycApproved)) {
-          return 'Landlord or tenant KYC approval is required before continuing.'
+          return requiredMessage
         }
-      } else if (!formData.agentKycApproved) {
-        return 'Agent approval is required before continuing.'
+      } else if (!boolFlag(formData.agentKycApproved)) {
+        return requiredMessage
       }
     }
-    if (currentStage.id === 'documents') {
-      if (!formData.creditCheckConsent || !formData.docsSubmitted) {
-        return 'Both consent checkboxes are required before continuing.'
+    if (currentStage.id === 'payment') {
+      if (
+        !asString(formData.paymentMethod).trim() ||
+        !hasUploadedFiles('proofOfPayment') ||
+        !boolFlag(formData.paymentConfirmed)
+      ) {
+        return requiredMessage
       }
     }
     if (currentStage.id === 'lease') {
       if (!partyHasSigned('lease', formData, user?.role)) {
-        return 'Confirm your lease signature checkbox before continuing.'
+        return requiredMessage
       }
       if (user?.role === 'admin' || user?.role === 'agent') {
         return 'Lease signing is confirmed by the tenant and landlord. You can upload the lease PDF, but only they click Next to unlock move-in.'
@@ -501,14 +601,20 @@ export default function ApplicationPage() {
     }
     if (currentStage.id === 'movein') {
       if (user?.role === 'tenant') {
+        if (!partyHasSigned('movein', formData, 'tenant')) {
+          return requiredMessage
+        }
         return landlordLed
-          ? 'Acknowledge the apartment condition with the checkbox. Only the landlord can click Next to finish.'
-          : 'Acknowledge the apartment condition with the checkbox. Only the agent can click Next to finish.'
+          ? 'Draw your freehand signature to acknowledge. Only the landlord can click Next to finish.'
+          : 'Draw your freehand signature to acknowledge. Only the agent can click Next to finish.'
       }
       if (landlordLed) {
         if (user?.role === 'landlord') {
+          if (!asString(formData.inspectionDate).trim()) {
+            return requiredMessage
+          }
           if (!partyHasSigned('movein', formData, 'landlord')) {
-            return 'Confirm the move-in inspection acknowledgment before clicking Next.'
+            return requiredMessage
           }
           if (!partyHasSigned('movein', formData, 'tenant')) {
             return 'The tenant must acknowledge the recorded condition before you can continue.'
@@ -519,12 +625,15 @@ export default function ApplicationPage() {
       } else {
         if (user?.role === 'landlord') {
           if (!partyHasSigned('movein', formData, 'landlord')) {
-            return 'Acknowledge the move-in inspection before the agent can finish.'
+            return requiredMessage
           }
           return 'Acknowledgment saved. Waiting for the agent to click Next.'
         }
+        if (!asString(formData.inspectionDate).trim()) {
+          return requiredMessage
+        }
         if (!partyHasSigned('movein', formData, 'agent')) {
-          return 'Confirm the inspection is accurate before clicking Next.'
+          return requiredMessage
         }
         if (!partyHasSigned('movein', formData, 'tenant')) {
           return 'The tenant must acknowledge the recorded condition before you can continue.'
@@ -571,7 +680,12 @@ export default function ApplicationPage() {
     nextForm: Record<string, unknown>,
     nextCompleted: Set<StageId>,
   ) {
-    if (assignedTenantId) return
+    if (assignedTenantId || asString(nextForm.tenantId)) {
+      if (!assignedTenantId && asString(nextForm.tenantId)) {
+        setAssignedTenantId(asString(nextForm.tenantId))
+      }
+      return
+    }
     if (!isAgent && !isLandlord) return
     const apartmentId = asString(nextForm.apartmentId)
     if (!apartmentId) return
@@ -843,13 +957,21 @@ export default function ApplicationPage() {
   // If agent/landlord reaches success after another party clicked the last move-in Next, finalise.
   useEffect(() => {
     if (currentStage.id !== 'success') return
-    if ((!isAgent && !isLandlord) || assignedTenantId) return
+    if ((!isAgent && !isLandlord) || assignedTenantId || asString(formData.tenantId)) return
     const applicationId = asString(formData.applicationId) || routeId
     if (!applicationId) return
     if (pendingAdvanceForStage('movein', formData).length > 0) return
     void finaliseTenancy(applicationId, formData, new Set(completed).add('success'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentStage.id, isAgent, isLandlord, assignedTenantId, formData.applicationId, routeId])
+  }, [
+    currentStage.id,
+    isAgent,
+    isLandlord,
+    assignedTenantId,
+    formData.applicationId,
+    formData.tenantId,
+    routeId,
+  ])
 
   if (loading) {
     return (
@@ -868,6 +990,13 @@ export default function ApplicationPage() {
     }
     if (mode === 'view' && !isActiveStep) return 'Go to current step'
     if (currentStage.id === 'movein' && user?.role === 'tenant') {
+      return landlordLed ? 'Waiting for landlord…' : 'Waiting for agent…'
+    }
+    if (
+      currentStage.id === 'movein' &&
+      user?.role === 'landlord' &&
+      !landlordLed
+    ) {
       return 'Waiting for agent…'
     }
     if (currentStage.id === 'lease' && (user?.role === 'admin' || user?.role === 'agent')) {
@@ -876,21 +1005,21 @@ export default function ApplicationPage() {
     return 'Next'
   })()
 
+  const moveInNextBlocked =
+    editable &&
+    currentStage.id === 'movein' &&
+    (user?.role === 'tenant' ||
+      (!landlordLed && user?.role === 'landlord') ||
+      (landlordLed && (user?.role === 'admin' || user?.role === 'agent')))
+
   const nextDisabled =
     saving ||
     mode === 'waiting' ||
     (mode === 'observing' && isSharedStep && advancePending.length > 0) ||
     (editable &&
       currentStage.id === 'lease' &&
-      (user?.role === 'admin' ||
-        user?.role === 'agent' ||
-        !partyHasSigned('lease', formData, user?.role))) ||
-    (editable &&
-      currentStage.id === 'movein' &&
-      (user?.role === 'tenant' ||
-        user?.role === 'landlord' ||
-        !partyHasSigned('movein', formData, 'agent') ||
-        !partyHasSigned('movein', formData, 'tenant')))
+      (user?.role === 'admin' || user?.role === 'agent')) ||
+    moveInNextBlocked
 
   return (
     <div className="app apply-page">

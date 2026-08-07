@@ -5,11 +5,14 @@ import UnitOnboardingForm, {
 } from '../../components/UnitOnboardingForm'
 import {
   createLandlordUnit,
+  deleteLandlordUnit,
   fetchLandlordPortfolio,
   updateLandlordUnitDetails,
 } from '../../data/api'
 import { formatDate, formatMoney } from '../../data/utils'
 import './LandlordUnitsPage.css'
+
+type ViewTab = 'current' | 'previous'
 
 function hasFinanceDetails(unit: Record<string, unknown>) {
   return (
@@ -29,11 +32,14 @@ function monthsToPayOff(bankOwed: number, rent: number) {
 export default function LandlordUnitsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [units, setUnits] = useState<Array<Record<string, unknown>>>([])
+  const [previousUnits, setPreviousUnits] = useState<Array<Record<string, unknown>>>([])
+  const [tab, setTab] = useState<ViewTab>('current')
   const [error, setError] = useState<string | null>(null)
   const [showAdd, setShowAdd] = useState(searchParams.get('add') === '1')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [editingDetails, setEditingDetails] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const [postalCode, setPostalCode] = useState('')
   const [levies, setLevies] = useState('')
@@ -45,17 +51,23 @@ export default function LandlordUnitsPage() {
   async function load() {
     try {
       const portfolio = await fetchLandlordPortfolio()
-      setUnits(portfolio.data.units)
+      const seen = new Set<string>()
+      const uniqueUnits = portfolio.data.units.filter((u) => {
+        const id = String(u.id)
+        if (seen.has(id)) return false
+        seen.add(id)
+        return true
+      })
+      const previous = portfolio.data.previousUnits ?? []
+      setUnits(uniqueUnits)
+      setPreviousUnits(previous)
       const fromQuery = searchParams.get('unit')
       setSelectedId((prev) => {
-        if (
-          fromQuery &&
-          portfolio.data.units.some((u) => String(u.id) === fromQuery)
-        ) {
+        if (fromQuery && uniqueUnits.some((u) => String(u.id) === fromQuery)) {
           return fromQuery
         }
-        if (prev && portfolio.data.units.some((u) => String(u.id) === prev)) return prev
-        return portfolio.data.units[0] ? String(portfolio.data.units[0].id) : null
+        if (prev && uniqueUnits.some((u) => String(u.id) === prev)) return prev
+        return uniqueUnits[0] ? String(uniqueUnits[0].id) : null
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load units')
@@ -120,6 +132,7 @@ export default function LandlordUnitsPage() {
         municipal: payload.municipal,
         purchasePrice: payload.purchasePrice,
         bankOwed: payload.bankOwed,
+        leaseConfig: payload.leaseConfig,
       })
       closeAdd()
       await load()
@@ -166,6 +179,30 @@ export default function LandlordUnitsPage() {
     }
   }
 
+  async function onDeleteSelected() {
+    if (!selected) return
+    const occupied = Boolean(selected.tenantId)
+    const ok = window.confirm(
+      occupied
+        ? 'Delete this unit? The current lease will end, the tenant will move to Previous tenants, and the unit will move to Previous units.'
+        : 'Delete this unit? It will move to Previous units.',
+    )
+    if (!ok) return
+    setDeleting(true)
+    setError(null)
+    try {
+      await deleteLandlordUnit(String(selected.id))
+      await load()
+      setTab('previous')
+      setSelectedId(null)
+      setSearchParams({})
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete unit')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const rentAmount = Number(selected?.rent) || 0
   const bankAmount = Number(selected?.bankOwed) || 0
   const payoffMonths =
@@ -178,7 +215,7 @@ export default function LandlordUnitsPage() {
       <header className="page-header">
         <div>
           <h1>My units</h1>
-          <p>Units registered under your landlord profile.</p>
+          <p>Current units under your landlord profile, plus previous units after deletion.</p>
         </div>
         {!showAdd ? (
           <button type="button" className="btn btn-primary btn-compact" onClick={openAdd}>
@@ -208,6 +245,71 @@ export default function LandlordUnitsPage() {
         <>
           {error ? <p className="login-error">{error}</p> : null}
 
+          <div className="tenant-tabs" role="tablist" aria-label="Unit views">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'current'}
+              className={`tenant-tab${tab === 'current' ? ' active' : ''}`}
+              onClick={() => setTab('current')}
+            >
+              Current ({units.length})
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={tab === 'previous'}
+              className={`tenant-tab${tab === 'previous' ? ' active' : ''}`}
+              onClick={() => setTab('previous')}
+            >
+              Previous units ({previousUnits.length})
+            </button>
+          </div>
+
+          {tab === 'previous' ? (
+            <div className="panel">
+              <div className="panel-body" style={{ paddingTop: 0 }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Unit</th>
+                      <th>Building</th>
+                      <th>Rent</th>
+                      <th>Deposit</th>
+                      <th>Deleted</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previousUnits.map((u) => (
+                      <tr key={String(u.id)}>
+                        <td>
+                          <strong>Unit {String(u.unitNumber)}</strong>
+                        </td>
+                        <td>
+                          {String(u.buildingName)}
+                          <div className="muted" style={{ fontSize: '0.8rem' }}>
+                            {String(u.buildingAddress ?? '')}
+                          </div>
+                        </td>
+                        <td>{formatMoney(Number(u.rent) || 0)}</td>
+                        <td>{formatMoney(Number(u.deposit) || 0)}</td>
+                        <td>
+                          {u.deletedAt
+                            ? formatDate(String(u.deletedAt).slice(0, 10))
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {previousUnits.length === 0 ? (
+                  <div className="empty-state">
+                    No previous units yet. Deleted units appear here.
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : (
           <div className="units-split">
             <section className="units-list-panel">
               <h2>Units</h2>
@@ -236,7 +338,7 @@ export default function LandlordUnitsPage() {
               </div>
               {units.length === 0 ? (
                 <div className="empty-state">
-                  No units yet.{' '}
+                  No current units.{' '}
                   <button type="button" className="btn btn-ghost btn-compact" onClick={openAdd}>
                     Add your first unit
                   </button>
@@ -255,7 +357,17 @@ export default function LandlordUnitsPage() {
                       </h2>
                       <p className="units-summary-sub">{String(selected.buildingAddress)}</p>
                     </div>
-                    <span className="badge">{String(selected.status)}</span>
+                    <div className="btn-row">
+                      <span className="badge">{String(selected.status)}</span>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-compact"
+                        disabled={deleting}
+                        onClick={() => void onDeleteSelected()}
+                      >
+                        {deleting ? 'Deleting…' : 'Delete unit'}
+                      </button>
+                    </div>
                   </header>
 
                   <dl className="units-summary-grid">
@@ -408,6 +520,7 @@ export default function LandlordUnitsPage() {
               )}
             </section>
           </div>
+          )}
         </>
       )}
 

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { downloadDocument, fetchTenantStay } from '../../data/api'
+import { downloadDocument, downloadTenantLease, fetchTenantStay } from '../../data/api'
 import { invoiceReason } from '../../data/invoiceHelpers'
 import { formatMoney } from '../../data/utils'
 
@@ -8,6 +8,7 @@ export default function TenantStayDetailPage() {
   const { id = '' } = useParams()
   const [data, setData] = useState<Record<string, unknown> | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [leaseBusy, setLeaseBusy] = useState(false)
 
   useEffect(() => {
     fetchTenantStay(id)
@@ -50,6 +51,22 @@ export default function TenantStayDetailPage() {
             <p>
               Landlord: {String(stay.landlordName)} ({String(stay.landlordEmail)})
             </p>
+            <button
+              type="button"
+              className="btn btn-primary btn-compact"
+              disabled={leaseBusy}
+              onClick={() => {
+                setLeaseBusy(true)
+                setError(null)
+                void downloadTenantLease(id)
+                  .catch((err) => {
+                    setError(err instanceof Error ? err.message : 'Could not download lease')
+                  })
+                  .finally(() => setLeaseBusy(false))
+              }}
+            >
+              {leaseBusy ? 'Preparing…' : 'Download lease agreement'}
+            </button>
           </section>
 
           <section className="form-section" style={{ marginBottom: '1.5rem' }}>

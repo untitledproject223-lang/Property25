@@ -273,6 +273,11 @@ function advanceKeyFor(
   return 'moveinNextAgent'
 }
 
+function hasMark(formData: Record<string, unknown>, key: string) {
+  const value = formData[key]
+  return typeof value === 'string' && value.trim().length > 0
+}
+
 export function partyHasSigned(
   stageId: 'lease' | 'movein',
   formData: Record<string, unknown>,
@@ -283,18 +288,38 @@ export function partyHasSigned(
   if (stageId === 'lease') {
     // Agent is not required to sign the lease.
     if (party === 'agent') return true
-    if (party === 'tenant') return bool(formData, 'signApplicantDone')
-    return bool(formData, 'signLandlordDone')
+    if (party === 'tenant') {
+      return bool(formData, 'signApplicantDone') && hasMark(formData, 'signApplicantMark')
+    }
+    return bool(formData, 'signLandlordDone') && hasMark(formData, 'signLandlordMark')
   }
   // Move-in: landlord-initiated apps require landlord + tenant; agent-led require agent + tenant + landlord ack.
   if (isLandlordInitiated(formData)) {
     if (party === 'agent') return true
-    if (party === 'tenant') return bool(formData, 'inspectionTenantSigned')
-    return bool(formData, 'inspectionLandlordSigned')
+    if (party === 'tenant') {
+      return (
+        bool(formData, 'inspectionTenantSigned') && hasMark(formData, 'inspectionTenantMark')
+      )
+    }
+    return (
+      bool(formData, 'inspectionLandlordSigned') &&
+      hasMark(formData, 'inspectionLandlordMark')
+    )
   }
-  if (party === 'tenant') return bool(formData, 'inspectionTenantSigned')
-  if (party === 'landlord') return bool(formData, 'inspectionLandlordSigned')
-  return bool(formData, 'inspectionAgentSigned')
+  if (party === 'tenant') {
+    return (
+      bool(formData, 'inspectionTenantSigned') && hasMark(formData, 'inspectionTenantMark')
+    )
+  }
+  if (party === 'landlord') {
+    return (
+      bool(formData, 'inspectionLandlordSigned') &&
+      hasMark(formData, 'inspectionLandlordMark')
+    )
+  }
+  return (
+    bool(formData, 'inspectionAgentSigned') && hasMark(formData, 'inspectionAgentMark')
+  )
 }
 
 export function partyHasAdvanced(

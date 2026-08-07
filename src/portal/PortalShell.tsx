@@ -84,6 +84,7 @@ export function LandlordShell() {
       nav={[
         { to: '/landlord', label: 'Dashboard', end: true },
         { to: '/landlord/units', label: 'Units' },
+        { to: '/landlord/tenants', label: 'Tenants' },
         { to: '/landlord/invoices', label: 'Invoices' },
         { to: '/landlord/issues', label: 'Tickets' },
         { to: '/landlord/profile', label: 'Profile' },

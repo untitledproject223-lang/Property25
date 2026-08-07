@@ -5,11 +5,19 @@ import { useDashboard } from '../../data/DashboardContext'
 import { vacantApartments } from '../../data/unitHelpers'
 import { formatMoney } from '../../data/utils'
 import {
+  fetchApartment,
   fetchLandlordPortfolio,
   fileToBase64,
   uploadDocument,
   type AuthRole,
 } from '../../data/api'
+import {
+  composeLeaseHtml,
+  factsFromApplicationData,
+  parseLeaseConfig,
+  type UnitLeaseConfig,
+} from '../../lease'
+import { SignaturePad } from '../SignaturePad'
 import { isLandlordInitiated, leaseSignatureStatuses, moveInSignStatuses } from '../../stages'
 
 /** Default admin / KYC check fee when a unit is selected (ZAR). */
@@ -54,13 +62,6 @@ function termMonthsFromAgreement(term: string): 12 | 24 | null {
   if (term === '12') return 12
   if (term === '24') return 24
   return null
-}
-
-function agreementTermLabel(term: string): string {
-  if (term === '12') return '12 Months'
-  if (term === '24') return '24 Months'
-  if (term === 'other') return 'Other'
-  return term
 }
 
 async function persistUpload(
@@ -270,6 +271,11 @@ function UnitSelectField({
           onChange('landlordId', landlordProfile.id)
           onChange('landlordName', landlordProfile.name)
         }
+        const leaseConfig =
+          'leaseConfig' in apartment
+            ? (apartment as { leaseConfig?: unknown }).leaseConfig
+            : null
+        if (leaseConfig) onChange('unitLeaseConfig', leaseConfig)
       }
       return
     }
@@ -289,6 +295,7 @@ function UnitSelectField({
       onChange('adminFeeAmount', DEFAULT_ADMIN_FEE)
       onChange('listingRef', `${b.name}-${apartment.unitNumber}`)
       onChange('amountType', 'monthly-rent')
+      if (apartment.leaseConfig) onChange('unitLeaseConfig', apartment.leaseConfig)
     } else {
       onChange('propertyAddress', '')
       onChange('unitNumber', '')
@@ -701,15 +708,6 @@ export function InquiryForm({ data, onChange, viewerRole }: FormProps) {
             <option value="lease-to-own">Lease to own</option>
           </select>
         </label>
-        <label className="field field-span">
-          <span className="field-label">Additional notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'applicationNotes')}
-            onChange={(e) => onChange('applicationNotes', e.target.value)}
-            placeholder="Any other basic details about the application…"
-          />
-        </label>
       </fieldset>
 
       <fieldset className="form-section">
@@ -915,15 +913,6 @@ export function DocumentsForm({ data, onChange }: FormProps) {
             placeholder="0"
           />
         </label>
-        <label className="field field-span">
-          <span className="field-label">Expense notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'expenseNotes')}
-            onChange={(e) => onChange('expenseNotes', e.target.value)}
-            placeholder="Briefly describe any other loans or recurring costs…"
-          />
-        </label>
       </fieldset>
 
       <fieldset className="form-section">
@@ -1002,15 +991,6 @@ export function DocumentsForm({ data, onChange }: FormProps) {
               *
             </span>
           </span>
-        </label>
-        <label className="field field-span">
-          <span className="field-label">Submission notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'docsNotes')}
-            onChange={(e) => onChange('docsNotes', e.target.value)}
-            placeholder="Anything the review team should know…"
-          />
         </label>
       </fieldset>
     </div>
@@ -1410,14 +1390,6 @@ export function KycFeesForm({ data, onChange }: FormProps) {
           <span className="field-hint">Auto-filled — no input required.</span>
         </label>
         <label className="field">
-          <span className="field-label">Payment date</span>
-          <input
-            type="date"
-            value={str(data, 'kycFeePaymentDate')}
-            onChange={(e) => onChange('kycFeePaymentDate', e.target.value)}
-          />
-        </label>
-        <label className="field">
           <span className="field-label">Payment method</span>
           <select
             value={str(data, 'kycFeePaymentMethod')}
@@ -1454,15 +1426,6 @@ export function KycFeesForm({ data, onChange }: FormProps) {
             onChange={(e) => onChange('kycFeePaymentConfirmed', e.target.checked)}
           />
           <span>I confirm the KYC check admin fees have been paid</span>
-        </label>
-        <label className="field field-span">
-          <span className="field-label">Payment notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'kycFeePaymentNotes')}
-            onChange={(e) => onChange('kycFeePaymentNotes', e.target.value)}
-            placeholder="Transaction reference or other payment details…"
-          />
         </label>
       </fieldset>
     </div>
@@ -1560,14 +1523,6 @@ export function PaymentForm({ data, onChange }: FormProps) {
           <span className="field-hint">Calculated total — no input required.</span>
         </label>
         <label className="field">
-          <span className="field-label">Payment date</span>
-          <input
-            type="date"
-            value={str(data, 'paymentDate')}
-            onChange={(e) => onChange('paymentDate', e.target.value)}
-          />
-        </label>
-        <label className="field">
           <span className="field-label">Payment method</span>
           <select
             value={str(data, 'paymentMethod')}
@@ -1599,15 +1554,6 @@ export function PaymentForm({ data, onChange }: FormProps) {
             onChange={(e) => onChange('paymentConfirmed', e.target.checked)}
           />
           <span>I confirm deposit, rent, and admin fees have been paid</span>
-        </label>
-        <label className="field field-span">
-          <span className="field-label">Payment notes</span>
-          <textarea
-            rows={3}
-            value={str(data, 'paymentNotes')}
-            onChange={(e) => onChange('paymentNotes', e.target.value)}
-            placeholder="Transaction reference or other payment details…"
-          />
         </label>
       </fieldset>
     </div>
@@ -1646,41 +1592,115 @@ function PartySignStatusBoard({
   )
 }
 
-function LeaseConfirmBlock({
+function LeaseSignatureBlock({
   legend,
-  confirmLabel,
+  markKey,
   doneKey,
+  dateKey,
+  nameKey,
   enabled,
   data,
   onChange,
 }: {
   legend: string
-  confirmLabel: string
+  markKey: string
   doneKey: string
+  dateKey: string
+  nameKey: string
   enabled: boolean
   data: Record<string, unknown>
   onChange: (key: string, value: unknown) => void
 }) {
+  const mark = str(data, markKey)
   const done = bool(data, doneKey)
   return (
-    <fieldset className="signature-block" disabled={!enabled}>
+    <fieldset className="signature-block" disabled={!enabled && !mark}>
       <legend>{legend}</legend>
-      <label className="check-field">
-        <input
-          type="checkbox"
-          checked={done}
-          onChange={(e) => onChange(doneKey, e.target.checked)}
+      {done && mark ? (
+        <SignaturePad
+          label="Saved signature"
+          existingMark={mark}
+          disabled={!enabled}
+          onAccept={() => undefined}
+          onClearSaved={
+            enabled
+              ? () => {
+                  onChange(markKey, '')
+                  onChange(doneKey, false)
+                  onChange(dateKey, '')
+                }
+              : undefined
+          }
         />
-        <span>{confirmLabel}</span>
-      </label>
-      {enabled ? (
+      ) : (
+        <SignaturePad
+          label="Draw your signature (mouse or finger)"
+          disabled={!enabled}
+          onAccept={(dataUrl) => {
+            onChange(markKey, dataUrl)
+            onChange(doneKey, true)
+            onChange(dateKey, new Date().toISOString().slice(0, 10))
+            if (!str(data, nameKey)) {
+              onChange(
+                nameKey,
+                legend.toLowerCase().includes('landlord')
+                  ? str(data, 'landlordName') || 'Landlord'
+                  : legend.toLowerCase().includes('agent')
+                    ? str(data, 'agentName') || 'Agent'
+                    : str(data, 'applicantName') || 'Tenant',
+              )
+            }
+          }}
+        />
+      )}
+      {enabled && !done ? (
         <span className="field-hint field-span">
-          Check this box to confirm your signature. Then use Next to continue — the page
-          will not advance automatically.
+          Draw your signature, then click “Use this signature”. Click Next after signing to
+          continue.
+        </span>
+      ) : null}
+      {done ? (
+        <span className="field-hint field-span">
+          Signed{str(data, dateKey) ? ` on ${str(data, dateKey)}` : ''}.
         </span>
       ) : null}
     </fieldset>
   )
+}
+
+function ensureLeaseDocument(
+  data: Record<string, unknown>,
+  onChange: (key: string, value: unknown) => void,
+  config: UnitLeaseConfig | null,
+) {
+  if (str(data, 'leaseDocumentHtml') || str(data, 'leasePdfDataUrl')) return
+  if (!config) {
+    // Fall back to generic template with no special clauses
+    const html = composeLeaseHtml(
+      {
+        mode: 'template',
+        selectedClauseIds: [],
+        clauseParams: {},
+        customClauses: [],
+      },
+      factsFromApplicationData(data),
+    )
+    onChange('leaseDocumentHtml', html)
+    onChange('leaseDocumentGeneratedAt', new Date().toISOString())
+    onChange('leaseDocumentMode', 'template')
+    return
+  }
+  if (config.mode === 'upload' && config.leasePdfDataUrl) {
+    onChange('leasePdfDataUrl', config.leasePdfDataUrl)
+    onChange('leasePdf', config.leasePdfName ? [config.leasePdfName] : ['Uploaded lease.pdf'])
+    onChange('leaseDocumentMode', 'upload')
+    onChange('leaseDocumentGeneratedAt', new Date().toISOString())
+    return
+  }
+  const html = composeLeaseHtml(config, factsFromApplicationData(data))
+  onChange('leaseDocumentHtml', html)
+  onChange('leaseDocumentGeneratedAt', new Date().toISOString())
+  onChange('leaseDocumentMode', 'template')
 }
 
 export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
@@ -1689,89 +1709,180 @@ export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
   const canLandlord = !viewerRole || viewerRole === 'landlord'
   const canAgent = isAgent
   const statuses = leaseSignatureStatuses(data)
+  const [loadingDoc, setLoadingDoc] = useState(false)
+
+  useEffect(() => {
+    if (str(data, 'leaseDocumentHtml') || str(data, 'leasePdfDataUrl')) return
+
+    const fromForm = parseLeaseConfig(data.unitLeaseConfig)
+    if (fromForm) {
+      ensureLeaseDocument(data, onChange, fromForm)
+      return
+    }
+
+    const apartmentId = str(data, 'apartmentId')
+    if (!apartmentId) {
+      ensureLeaseDocument(data, onChange, null)
+      return
+    }
+
+    let cancelled = false
+    setLoadingDoc(true)
+    void fetchApartment(apartmentId)
+      .then((result) => {
+        if (cancelled) return
+        const raw = result.data.leaseConfig ?? result.data.lease_config ?? null
+        const config = parseLeaseConfig(raw)
+        if (config) onChange('unitLeaseConfig', config)
+        ensureLeaseDocument(
+          { ...data, unitLeaseConfig: config ?? data.unitLeaseConfig },
+          onChange,
+          config,
+        )
+      })
+      .catch(() => {
+        if (!cancelled) ensureLeaseDocument(data, onChange, null)
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingDoc(false)
+      })
+
+    return () => {
+      cancelled = true
+    }
+    // Intentionally once when lease stage mounts / when ids change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [str(data, 'apartmentId'), str(data, 'leaseDocumentHtml'), str(data, 'leasePdfDataUrl')])
+
+  const htmlDoc = str(data, 'leaseDocumentHtml')
+  const pdfUrl = str(data, 'leasePdfDataUrl')
+  const mode = str(data, 'leaseDocumentMode') || (pdfUrl ? 'upload' : 'template')
+
+  // Keep template lease preview in sync with freehand signatures once captured.
+  useEffect(() => {
+    if (mode === 'upload' || pdfUrl) return
+    if (!htmlDoc) return
+    const tenantMark = str(data, 'signApplicantMark')
+    const landlordMark = str(data, 'signLandlordMark')
+    if (!tenantMark && !landlordMark) return
+    const config =
+      parseLeaseConfig(data.unitLeaseConfig) ??
+      ({
+        mode: 'template' as const,
+        selectedClauseIds: [],
+        clauseParams: {},
+        customClauses: [],
+      } satisfies UnitLeaseConfig)
+    const nextHtml = composeLeaseHtml(config, factsFromApplicationData(data))
+    if (nextHtml !== htmlDoc) onChange('leaseDocumentHtml', nextHtml)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    mode,
+    pdfUrl,
+    str(data, 'signApplicantMark'),
+    str(data, 'signLandlordMark'),
+    str(data, 'signApplicantDate'),
+    str(data, 'signLandlordDate'),
+    str(data, 'signApplicantName'),
+    str(data, 'signLandlordName'),
+  ])
 
   return (
     <div className="form-grid">
       <div className="role-callout role-shared" role="note">
         <strong>Lease signing — tenant and landlord.</strong>
         <span>
-          Confirm your signature with the checkbox, then click Next. Move-in unlocks only
-          after both the tenant and the landlord have clicked Next. The agent is not
-          required to sign.
+          Review the lease document, draw your freehand signature, then click Next. Move-in
+          unlocks only after both the tenant and the landlord have clicked Next. The agent
+          is not required to sign.
         </span>
       </div>
 
       <PartySignStatusBoard statuses={statuses} />
 
-      <fieldset className="form-section" disabled={!canAgent}>
-        <legend>Lease document</legend>
-        <FileField
-          id="leasePdf"
-          label="Lease agreement (PDF)"
-          hint="Upload the lease PDF to be signed"
-          accept=".pdf,application/pdf"
-          files={fileNames(data, 'leasePdf')}
-          uploading={bool(data, 'leasePdfUploading')}
-          onChange={makeMultiFileHandler(data, onChange, 'leasePdf', 'leasePdf')}
-        />
-        <label className="field">
-          <span className="field-label">Lease start date</span>
-          <input
-            type="date"
-            value={str(data, 'leaseStartDate') || str(data, 'moveInDate')}
-            onChange={(e) => onChange('leaseStartDate', e.target.value)}
+      {canAgent ? (
+        <fieldset className="form-section">
+          <legend>Lease dates</legend>
+          <label className="field">
+            <span className="field-label">Lease start date</span>
+            <input
+              type="date"
+              value={str(data, 'leaseStartDate') || str(data, 'moveInDate')}
+              onChange={(e) => onChange('leaseStartDate', e.target.value)}
+            />
+          </label>
+          <label className="field">
+            <span className="field-label">Lease end date</span>
+            <input
+              type="date"
+              value={str(data, 'leaseEndDate') || str(data, 'termEndDate')}
+              onChange={(e) => onChange('leaseEndDate', e.target.value)}
+            />
+          </label>
+          <p className="field-hint field-span">
+            The lease document is generated from the unit’s template or uploaded PDF. Agent
+            override upload is optional if the unit has no lease config yet.
+          </p>
+          <FileField
+            id="leasePdf"
+            label="Optional override PDF"
+            hint="Only needed if the unit has no lease configuration"
+            accept=".pdf,application/pdf"
+            files={fileNames(data, 'leasePdf')}
+            uploading={bool(data, 'leasePdfUploading')}
+            onChange={makeMultiFileHandler(data, onChange, 'leasePdf', 'leasePdf')}
           />
-        </label>
-        <label className="field">
-          <span className="field-label">Lease end date</span>
-          <input
-            type="date"
-            value={str(data, 'leaseEndDate') || str(data, 'termEndDate')}
-            onChange={(e) => onChange('leaseEndDate', e.target.value)}
-          />
-        </label>
-      </fieldset>
+        </fieldset>
+      ) : null}
 
       <div className="pdf-signer">
-        <div className="pdf-preview" aria-label="Lease PDF preview">
+        <div className="pdf-preview lease-doc-frame" aria-label="Lease agreement document">
           <div className="pdf-preview-header">
             <span>Lease agreement</span>
             <span className="pdf-file-name">
-              {fileNames(data, 'leasePdf').join(', ') || 'No PDF uploaded yet'}
+              {mode === 'upload'
+                ? fileNames(data, 'leasePdf').join(', ') || 'Uploaded PDF'
+                : 'Platform template'}
+              {str(data, 'leaseDocumentGeneratedAt')
+                ? ` · ${str(data, 'leaseDocumentGeneratedAt').slice(0, 10)}`
+                : ''}
             </span>
           </div>
-          <div className="pdf-preview-body">
-            <p className="pdf-doc-title">RESIDENTIAL LEASE AGREEMENT</p>
-            <p>
-              Property:{' '}
-              <strong>{str(data, 'propertyAddress') || 'Apartment address'}</strong>
-            </p>
-            <p>
-              Tenant: <strong>{str(data, 'applicantName') || 'Applicant name'}</strong>
-            </p>
-            <p>
-              Term: <strong>{agreementTermLabel(str(data, 'agreementTerm')) || '—'}</strong>
-            </p>
-            <p className="pdf-preview-note">
-              Preview placeholder — in production this area shows the uploaded PDF for
-              on-screen review before signing.
-            </p>
+          <div className="lease-doc-scroller">
+            {loadingDoc ? (
+              <p className="pdf-preview-note">Preparing lease document…</p>
+            ) : pdfUrl ? (
+              <iframe title="Lease PDF" src={pdfUrl} className="lease-doc-iframe" />
+            ) : htmlDoc ? (
+              <iframe
+                title="Lease agreement"
+                className="lease-doc-iframe"
+                srcDoc={htmlDoc}
+                sandbox=""
+              />
+            ) : (
+              <p className="pdf-preview-note">Lease document is not available yet.</p>
+            )}
           </div>
         </div>
 
-        <div className="signature-grid">
-          <LeaseConfirmBlock
+        <div className="signature-grid signature-grid-2">
+          <LeaseSignatureBlock
             legend="Applicant signature"
-            confirmLabel="I confirm that I have signed the lease agreement"
+            markKey="signApplicantMark"
             doneKey="signApplicantDone"
+            dateKey="signApplicantDate"
+            nameKey="signApplicantName"
             enabled={canTenant}
             data={data}
             onChange={onChange}
           />
-          <LeaseConfirmBlock
+          <LeaseSignatureBlock
             legend="Landlord signature"
-            confirmLabel="I confirm that I have signed the lease agreement"
+            markKey="signLandlordMark"
             doneKey="signLandlordDone"
+            dateKey="signLandlordDate"
+            nameKey="signLandlordName"
             enabled={canLandlord}
             data={data}
             onChange={onChange}
@@ -1785,6 +1896,29 @@ export function LeaseForm({ data, onChange, viewerRole }: FormProps) {
 export function SuccessForm({ data }: FormProps) {
   const applicant = str(data, 'applicantName') || 'the applicant'
   const property = str(data, 'propertyAddress') || 'the selected unit'
+  const applicationId = str(data, 'applicationId')
+  const tenantId = str(data, 'tenantId')
+  const [leaseBusy, setLeaseBusy] = useState(false)
+  const [leaseError, setLeaseError] = useState<string | null>(null)
+
+  async function onDownloadLease() {
+    setLeaseBusy(true)
+    setLeaseError(null)
+    try {
+      const { downloadApplicationLease, downloadTenantLease } = await import('../../data/api')
+      if (tenantId) {
+        await downloadTenantLease(tenantId)
+      } else if (applicationId) {
+        await downloadApplicationLease(applicationId)
+      } else {
+        throw new Error('Lease is not ready to download yet')
+      }
+    } catch (err) {
+      setLeaseError(err instanceof Error ? err.message : 'Could not download lease')
+    } finally {
+      setLeaseBusy(false)
+    }
+  }
 
   return (
     <div className="success-panel" role="status">
@@ -1811,8 +1945,22 @@ export function SuccessForm({ data }: FormProps) {
         <li>Move-in inspection recorded</li>
         <li>Application closed successfully</li>
       </ul>
+      {applicationId || tenantId ? (
+        <div className="success-panel-actions">
+          <button
+            type="button"
+            className="btn btn-primary btn-compact"
+            disabled={leaseBusy}
+            onClick={() => void onDownloadLease()}
+          >
+            {leaseBusy ? 'Preparing lease…' : 'Download lease agreement'}
+          </button>
+          {leaseError ? <p className="login-error">{leaseError}</p> : null}
+        </div>
+      ) : null}
       <p className="success-panel-note">
-        Use <strong>Go to Dashboard</strong> below to return to your portal home.
+        Use <strong>Go to Dashboard</strong> below to return to your portal home. You can also
+        download the lease later from the tenant profile.
       </p>
     </div>
   )
@@ -1988,48 +2136,43 @@ export function MoveInForm({ data, onChange, viewerRole }: FormProps) {
 
       <fieldset className="form-section">
         <legend>Sign-off</legend>
-        <label className="field field-span">
-          <span className="field-label">General comments</span>
-          <textarea
-            rows={4}
-            value={str(data, 'inspectionNotes')}
-            onChange={(e) => canFillChecklist && onChange('inspectionNotes', e.target.value)}
-            readOnly={!canFillChecklist}
-            placeholder="Overall condition summary, outstanding issues, keys handed over…"
-          />
-        </label>
-        {canAgentAck ? (
-          <label className="check-field">
-            <input
-              type="checkbox"
-              disabled={!canAgentAck}
-              checked={bool(data, 'inspectionAgentSigned')}
-              onChange={(e) => onChange('inspectionAgentSigned', e.target.checked)}
+        <div className="signature-grid signature-grid-movein">
+          {canAgentAck || bool(data, 'inspectionAgentSigned') ? (
+            <LeaseSignatureBlock
+              legend="Agent acknowledgement"
+              markKey="inspectionAgentMark"
+              doneKey="inspectionAgentSigned"
+              dateKey="inspectionAgentDate"
+              nameKey="inspectionAgentName"
+              enabled={canAgentAck}
+              data={data}
+              onChange={onChange}
             />
-            <span>Agent confirms this move-in inspection is accurate</span>
-          </label>
-        ) : null}
-        <label className="check-field">
-          <input
-            type="checkbox"
-            disabled={!canLandlordAck}
-            checked={bool(data, 'inspectionLandlordSigned')}
-            onChange={(e) => onChange('inspectionLandlordSigned', e.target.checked)}
+          ) : null}
+          <LeaseSignatureBlock
+            legend="Landlord acknowledgement"
+            markKey="inspectionLandlordMark"
+            doneKey="inspectionLandlordSigned"
+            dateKey="inspectionLandlordDate"
+            nameKey="inspectionLandlordName"
+            enabled={canLandlordAck}
+            data={data}
+            onChange={onChange}
           />
-          <span>Landlord acknowledges the move-in inspection</span>
-        </label>
-        <label className="check-field">
-          <input
-            type="checkbox"
-            disabled={!canTenant}
-            checked={bool(data, 'inspectionTenantSigned')}
-            onChange={(e) => onChange('inspectionTenantSigned', e.target.checked)}
+          <LeaseSignatureBlock
+            legend="Tenant acknowledgement"
+            markKey="inspectionTenantMark"
+            doneKey="inspectionTenantSigned"
+            dateKey="inspectionTenantDate"
+            nameKey="inspectionTenantName"
+            enabled={canTenant}
+            data={data}
+            onChange={onChange}
           />
-          <span>Tenant acknowledges the recorded condition of the apartment</span>
-        </label>
+        </div>
         {canTenant && !canFillChecklist ? (
           <span className="field-hint">
-            Check the box above to acknowledge.{' '}
+            Draw your signature to acknowledge.{' '}
             {landlordLed
               ? 'Only the landlord can click Next to finish this application.'
               : 'Only the agent can click Next to finish this application.'}

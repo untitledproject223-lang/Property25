@@ -1,6 +1,10 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { sql } from '../db/client.js'
+import {
+  assertCanDownloadTenantLease,
+  ensureTenantLeaseDocument,
+} from '../lib/ensureTenantLeaseDocument.js'
 import { requireAuth, requireAgent } from '../middleware/auth.js'
 import { AppError } from '../middleware/error.js'
 
@@ -56,9 +60,15 @@ tenantsRouter.post('/', async (req, res, next) => {
   try {
     const body = createTenantSchema.parse(req.body)
     const apartment = await sql`
-      SELECT id FROM apartments WHERE id = ${body.apartmentId} AND org_id = ${req.orgId!} LIMIT 1
+      SELECT id, deleted_at
+      FROM apartments
+      WHERE id = ${body.apartmentId} AND org_id = ${req.orgId!}
+      LIMIT 1
     `
     if (apartment.length === 0) throw new AppError(400, 'apartmentId not found in this org')
+    if (apartment[0].deleted_at) {
+      throw new AppError(400, 'This unit has been deleted and cannot receive new tenants')
+    }
 
     let applicationId = body.applicationId ?? null
     let applicantUserId: string | null = null
@@ -73,6 +83,40 @@ tenantsRouter.post('/', async (req, res, next) => {
       applicantUserId = app[0].applicant_user_id
         ? String(app[0].applicant_user_id)
         : null
+
+      // Idempotent: never create a second tenant row for the same application.
+      const existingForApp = await sql`
+        SELECT id, org_id, apartment_id, application_id, user_id, name, email, phone, whatsapp,
+          lease_start, lease_end, status, balance, docs_json, move_in_inspection_json,
+          created_at, updated_at
+        FROM tenants
+        WHERE application_id = ${applicationId} AND org_id = ${req.orgId!}
+        ORDER BY
+          CASE WHEN status IN ('active', 'notice') THEN 0 ELSE 1 END,
+          updated_at DESC NULLS LAST
+        LIMIT 1
+      `
+      if (existingForApp.length > 0) {
+        res.status(200).json({ data: existingForApp[0] })
+        return
+      }
+    }
+
+    // One current lease per unit — do not stack active tenants.
+    const activeOnUnit = await sql`
+      SELECT id, org_id, apartment_id, application_id, user_id, name, email, phone, whatsapp,
+        lease_start, lease_end, status, balance, docs_json, move_in_inspection_json,
+        created_at, updated_at
+      FROM tenants
+      WHERE apartment_id = ${body.apartmentId}
+        AND org_id = ${req.orgId!}
+        AND status IN ('active', 'notice')
+      ORDER BY updated_at DESC NULLS LAST
+      LIMIT 1
+    `
+    if (activeOnUnit.length > 0) {
+      res.status(200).json({ data: activeOnUnit[0] })
+      return
     }
 
     const rows = await sql`
@@ -104,9 +148,44 @@ tenantsRouter.post('/', async (req, res, next) => {
         SET status = 'tenant', updated_at = now()
         WHERE id = ${applicationId} AND org_id = ${req.orgId!}
       `
+      // Best-effort: materialize signed lease for later download by all parties.
+      try {
+        await ensureTenantLeaseDocument({
+          orgId: req.orgId!,
+          tenantId: String(rows[0].id),
+          applicationId,
+        })
+      } catch {
+        // Lease may still be downloadable later once form_json has content.
+      }
     }
 
     res.status(201).json({ data: rows[0] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+/** Download the signed lease for a tenant (agent, landlord, or that tenant). */
+tenantsRouter.get('/:id/lease', async (req, res, next) => {
+  try {
+    const id = z.string().uuid().parse(req.params.id)
+    const auth = req.auth!
+    const tenant = await assertCanDownloadTenantLease({
+      orgId: req.orgId!,
+      userId: auth.sub,
+      email: auth.email,
+      role: auth.role,
+      profileId: auth.profileId ?? null,
+      tenantId: id,
+    })
+
+    const doc = await ensureTenantLeaseDocument({
+      orgId: req.orgId!,
+      tenantId: id,
+      applicationId: tenant.application_id ? String(tenant.application_id) : null,
+    })
+    res.json({ data: doc })
   } catch (err) {
     next(err)
   }
@@ -212,16 +291,25 @@ tenantsRouter.post('/:id/terminate', requireAgent, async (req, res, next) => {
 
     const apartmentId = String(existing[0].apartment_id)
 
+    // Close this lease and any duplicate active leases still on the same unit.
     const rows = await sql`
       UPDATE tenants
       SET
         status = 'former',
         lease_end = ${body.terminationDate},
-        termination_reason = ${body.reason.trim()},
-        deposit_paid_out = ${body.depositPaidOut},
+        termination_reason = CASE
+          WHEN id = ${id} THEN ${body.reason.trim()}
+          ELSE COALESCE(termination_reason, ${body.reason.trim()})
+        END,
+        deposit_paid_out = CASE
+          WHEN id = ${id} THEN ${body.depositPaidOut}
+          ELSE deposit_paid_out
+        END,
         terminated_at = ${body.terminationDate},
         updated_at = now()
-      WHERE id = ${id} AND org_id = ${req.orgId!}
+      WHERE org_id = ${req.orgId!}
+        AND apartment_id = ${apartmentId}
+        AND (id = ${id} OR status IN ('active', 'notice'))
       RETURNING id, apartment_id AS "apartmentId", name, email, phone, status,
         lease_start AS "leaseStart", lease_end AS "leaseEnd",
         termination_reason AS "terminationReason",
@@ -241,7 +329,29 @@ tenantsRouter.post('/:id/terminate', requireAgent, async (req, res, next) => {
       WHERE id = ${apartmentId} AND org_id = ${req.orgId!}
     `
 
-    res.json({ data: rows[0] })
+    const closedTenantIds = rows.map((r) => String(r.id))
+    if (closedTenantIds.length > 0) {
+      await sql`
+        UPDATE issues
+        SET
+          status = 'resolved',
+          updated_at = now(),
+          messages_json = COALESCE(messages_json, '[]'::jsonb) || ${JSON.stringify([
+            {
+              id: crypto.randomUUID(),
+              author: 'agent',
+              body: 'Ticket closed automatically because the lease was terminated.',
+              at: new Date().toISOString(),
+            },
+          ])}::jsonb
+        WHERE org_id = ${req.orgId!}
+          AND tenant_id = ANY(${closedTenantIds}::uuid[])
+          AND status IN ('open', 'pending')
+      `
+    }
+
+    const primary = rows.find((r) => String(r.id) === id) ?? rows[0]
+    res.json({ data: primary })
   } catch (err) {
     next(err)
   }

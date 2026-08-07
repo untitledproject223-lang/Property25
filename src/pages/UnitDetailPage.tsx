@@ -224,7 +224,14 @@ export default function UnitDetailPage() {
   }
 
   async function handleDelete() {
-    if (!id || !vacant) return
+    if (!id) return
+    const ok = window.confirm(
+      vacant
+        ? 'Delete this unit? It will move to Previous units.'
+        : 'Delete this unit? The current lease will end, the tenant will move to Previous tenants, and the unit will move to Previous units.',
+    )
+    if (!ok) return
+    setEditError('')
     const result = await deleteUnit(id)
     if (!result.ok) {
       setEditError(result.error ?? 'Could not delete unit')
@@ -291,8 +298,7 @@ export default function UnitDetailPage() {
           <button
             type="button"
             className="btn btn-ghost btn-compact"
-            disabled={!vacant}
-            title={vacant ? 'Delete unit' : 'Occupied units cannot be deleted'}
+            title="Delete unit and move it to Previous units"
             onClick={() => void handleDelete()}
           >
             Delete

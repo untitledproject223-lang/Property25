@@ -2,6 +2,7 @@ import type { AuthRole } from '../data/api'
 import type { PortalRole, StageDefinition } from '../stages'
 import {
   formatPartyList,
+  isLandlordInitiated,
   leaseSignatureStatuses,
   moveInSignStatuses,
   partyHasAdvanced,
@@ -48,6 +49,7 @@ function SharedSigningOutline({
   stageId: 'lease' | 'movein'
   formData: Record<string, unknown>
 }) {
+  const landlordLed = isLandlordInitiated(formData)
   const statuses =
     stageId === 'lease'
       ? leaseSignatureStatuses(formData)
@@ -57,13 +59,16 @@ function SharedSigningOutline({
   const nextParties =
     stageId === 'lease'
       ? statuses
-      : statuses.filter((s) => s.role === 'agent')
+      : landlordLed
+        ? statuses.filter((s) => s.role === 'landlord')
+        : statuses.filter((s) => s.role === 'agent')
   const continued = nextParties.filter((s) =>
     partyHasAdvanced(stageId, formData, s.role),
   )
   const pendingNext = nextParties.filter(
     (s) => !partyHasAdvanced(stageId, formData, s.role),
   )
+  const nextActorLabel = landlordLed ? 'Landlord' : 'Agent'
 
   return (
     <div className="stage-sign-outline" role="status">
@@ -93,7 +98,7 @@ function SharedSigningOutline({
       </p>
       <p className="stage-sign-outline-line">
         <span className="stage-sign-label signed">
-          {stageId === 'movein' ? 'Agent clicked Next' : 'Clicked Next'}
+          {stageId === 'movein' ? `${nextActorLabel} clicked Next` : 'Clicked Next'}
         </span>
         {continued.length > 0 ? (
           continued.map((s) => (
@@ -134,9 +139,12 @@ export function StagePanel({
   const observing = mode === 'observing'
   const viewOnly = mode === 'view' || waiting || observing || stage.id === 'success'
   const isShared = stage.id === 'lease' || stage.id === 'movein'
+  const landlordLed = isLandlordInitiated(formData)
   const advancePending = isShared ? pendingAdvanceForStage(stage.id, formData) : []
   const signaturePending = isShared ? pendingSignaturesForStage(stage.id, formData) : []
   const allAdvanced = isShared && advancePending.length === 0
+  const moveInFinisher = landlordLed ? 'landlord' : 'agent'
+  const moveInFinisherLabel = landlordLed ? 'Landlord' : 'Agent'
 
   return (
     <section
@@ -194,7 +202,7 @@ export function StagePanel({
             <strong>
               {stage.id === 'lease'
                 ? 'Tenant and landlord have signed and clicked Next'
-                : 'Agent has completed move-in'}
+                : `${moveInFinisherLabel} has completed move-in`}
             </strong>
             <span>
               {stage.id === 'lease'
@@ -219,24 +227,26 @@ export function StagePanel({
             <span>
               {stage.id === 'lease'
                 ? 'The next step unlocks after both the tenant and the landlord click Next.'
-                : 'The success page opens when the agent clicks Next.'}
+                : `The success page opens when the ${moveInFinisher} clicks Next.`}
             </span>
           </div>
         ) : isShared && isActiveStep ? (
           <div className="stage-partial-banner" role="status">
             <strong>
-              {stage.id === 'movein' && (viewerRole === 'tenant')
+              {stage.id === 'movein' && viewerRole === 'tenant'
                 ? 'Acknowledge the apartment condition'
                 : signaturePending.length > 0
-                  ? 'Confirm your signature, then click Next'
+                  ? 'Draw your signature, then click Next'
                   : 'Click Next to continue'}
             </strong>
             <span>
               {stage.id === 'lease'
-                ? 'Checking the signature box does not advance the page. Next becomes available after you confirm, and move-in unlocks after both tenant and landlord click Next.'
+                ? 'Draw your freehand signature, then click Next. Move-in unlocks after both tenant and landlord click Next.'
                 : viewerRole === 'tenant'
-                  ? 'Check the acknowledgement box. Only the agent can click Next to finish.'
-                  : 'Complete the inspection, confirm accuracy, and click Next once the tenant has acknowledged. That moves everyone to success.'}
+                  ? `Draw your freehand acknowledgement. Only the ${moveInFinisher} can click Next to finish.`
+                  : landlordLed
+                    ? 'Complete the inspection, sign to acknowledge, and click Next once the tenant has signed. That moves everyone to success.'
+                    : 'Complete the inspection, sign to confirm accuracy, and click Next once the tenant has acknowledged. That moves everyone to success.'}
             </span>
           </div>
         ) : (
@@ -247,7 +257,7 @@ export function StagePanel({
                 ? 'Approve or reject based on income risk and KYC before continuing.'
                 : stage.id === 'documents'
                   ? 'Both consent checkboxes are required before continuing.'
-                  : 'Complete your required fields, then continue.'}
+                  : 'Please complete all required fields before continuing.'}
           </p>
         )}
       </header>

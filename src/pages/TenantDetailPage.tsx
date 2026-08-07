@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { downloadTenantLease } from '../data/api'
 import { useDashboard } from '../data/DashboardContext'
 import { ContactActions } from '../dashboard/ContactActions'
 import type { InvoiceItem, InvoiceItemType, PaymentMethod, PaymentType } from '../data/types'
@@ -46,6 +47,8 @@ export default function TenantDetailPage() {
     logLandlordUpdate,
   } = useDashboard()
   const [tab, setTab] = useState<Tab>('Overview')
+  const [leaseBusy, setLeaseBusy] = useState(false)
+  const [leaseError, setLeaseError] = useState('')
   const ctx = id ? tenantApartment(id) : null
 
   const payments = useMemo(
@@ -207,8 +210,27 @@ export default function TenantDetailPage() {
         <div className="panel">
           <div className="panel-header">
             <h2>Lease & documents</h2>
+            <button
+              type="button"
+              className="btn btn-primary btn-compact"
+              disabled={leaseBusy}
+              onClick={() => {
+                setLeaseBusy(true)
+                setLeaseError('')
+                void downloadTenantLease(tenant.id)
+                  .catch((err) => {
+                    setLeaseError(
+                      err instanceof Error ? err.message : 'Could not download lease',
+                    )
+                  })
+                  .finally(() => setLeaseBusy(false))
+              }}
+            >
+              {leaseBusy ? 'Preparing…' : 'Download lease'}
+            </button>
           </div>
           <div className="panel-body detail-list">
+            {leaseError ? <p className="login-error">{leaseError}</p> : null}
             <div>
               <span>Lease period</span>
               <strong>
@@ -217,7 +239,7 @@ export default function TenantDetailPage() {
             </div>
             <div>
               <span>Lease file</span>
-              <strong>{tenant.docs?.leaseFile ?? 'Not on file'}</strong>
+              <strong>{tenant.docs?.leaseFile ?? 'Available for download'}</strong>
             </div>
             <div>
               <span>ID document</span>

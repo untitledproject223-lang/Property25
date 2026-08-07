@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
   changePassword,
   downloadDocument,
+  downloadTenantLease,
   fetchTenantProfile,
   fileToBase64,
   listDocuments,
@@ -25,6 +26,7 @@ export default function TenantProfilePage() {
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [saving, setSaving] = useState(false)
+  const [leaseBusy, setLeaseBusy] = useState(false)
 
   async function load() {
     const r = await fetchTenantProfile()
@@ -239,8 +241,34 @@ export default function TenantProfilePage() {
               <h2>Lease agreement</h2>
             </div>
             <div className="panel-body">
+              {profile.tenantId ? (
+                <div className="btn-row" style={{ marginBottom: leaseDocs.length ? '0.75rem' : 0 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-compact"
+                    disabled={leaseBusy}
+                    onClick={() => {
+                      setLeaseBusy(true)
+                      setError(null)
+                      void downloadTenantLease(String(profile.tenantId))
+                        .catch((err) => {
+                          setError(
+                            err instanceof Error ? err.message : 'Could not download lease',
+                          )
+                        })
+                        .finally(() => setLeaseBusy(false))
+                    }}
+                  >
+                    {leaseBusy ? 'Preparing…' : 'Download lease agreement'}
+                  </button>
+                </div>
+              ) : null}
               {leaseDocs.length === 0 ? (
-                <p className="muted">No lease document is available yet.</p>
+                <p className="muted">
+                  {profile.tenantId
+                    ? 'Your signed lease is available via the button above.'
+                    : 'No lease document is available yet.'}
+                </p>
               ) : (
                 <ul className="profile-doc-list">
                   {leaseDocs.map((doc) => (
@@ -251,7 +279,7 @@ export default function TenantProfilePage() {
                         className="btn btn-ghost btn-compact"
                         onClick={() => void downloadDocument(doc.id)}
                       >
-                        Download lease
+                        Download
                       </button>
                     </li>
                   ))}

@@ -20,8 +20,10 @@ dashboardRouter.get('/', async (req, res, next) => {
             COALESCE(deposit_balance, deposit)::float8 AS "depositBalance",
             status,
             next_due_date AS "nextDueDate", landlord_id AS "landlordId",
-            ticket_manager AS "ticketManager"
+            ticket_manager AS "ticketManager",
+            lease_config AS "leaseConfig"
           FROM apartments WHERE org_id = ${orgId}
+            AND deleted_at IS NULL
           ORDER BY unit_number
         `,
         sql`
@@ -30,7 +32,10 @@ dashboardRouter.get('/', async (req, res, next) => {
             balance::float8 AS balance, docs_json AS docs,
             move_in_inspection_json AS "moveInInspection",
             user_id AS "userId",
-            application_id AS "applicationId"
+            application_id AS "applicationId",
+            termination_reason AS "terminationReason",
+            deposit_paid_out AS "depositPaidOut",
+            terminated_at AS "terminatedAt"
           FROM tenants
           WHERE org_id = ${orgId}
             AND application_id IS NOT NULL

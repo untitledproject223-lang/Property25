@@ -145,6 +145,7 @@ export default function LandlordsPage() {
         municipal: payload.municipal,
         purchasePrice: payload.purchasePrice,
         bankOwed: payload.bankOwed,
+        leaseConfig: payload.leaseConfig,
         status: 'vacant',
       })
       setShowUnitOnboard(false)

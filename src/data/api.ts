@@ -134,11 +134,21 @@ export async function createApartment(input: {
   municipal?: number | null
   purchasePrice?: number | null
   bankOwed?: number | null
+  leaseConfig?: Record<string, unknown> | null
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/apartments', {
     method: 'POST',
     body: input,
   })
+}
+
+export async function fetchApartment(id: string) {
+  return apiRequest<{
+    data: Record<string, unknown> & {
+      leaseConfig?: Record<string, unknown> | null
+      lease_config?: Record<string, unknown> | null
+    }
+  }>(`/api/apartments/${id}`)
 }
 
 export async function updateApartment(
@@ -151,6 +161,7 @@ export async function updateApartment(
     deposit: number
     status: 'vacant' | 'occupied' | 'notice'
     nextDueDate: string | null
+    leaseConfig: Record<string, unknown> | null
   }>,
 ) {
   return apiRequest<{ data: Record<string, unknown> }>(`/api/apartments/${id}`, {
@@ -160,7 +171,21 @@ export async function updateApartment(
 }
 
 export async function deleteApartment(id: string) {
-  return apiRequest<{ data: { id: string } }>(`/api/apartments/${id}`, { method: 'DELETE' })
+  return apiRequest<{ data: { id: string; deletedAt?: string } }>(`/api/apartments/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function listApartments(scope: 'current' | 'previous' = 'current') {
+  const qs = new URLSearchParams({ scope })
+  return apiRequest<{ data: Array<Record<string, unknown>> }>(`/api/apartments?${qs}`)
+}
+
+export async function deleteLandlordUnit(unitId: string) {
+  return apiRequest<{ data: { id: string; deletedAt?: string } }>(
+    `/api/portal/landlord/units/${unitId}`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function createTenant(input: {
@@ -485,11 +510,18 @@ export async function fetchLandlordTenants() {
   return apiRequest<{ data: Array<Record<string, unknown>> }>('/api/portal/landlord/tenants')
 }
 
+export async function fetchLandlordTenantHistory() {
+  return apiRequest<{ data: Array<Record<string, unknown>> }>(
+    '/api/portal/landlord/tenant-history',
+  )
+}
+
 export async function fetchLandlordPortfolio() {
   return apiRequest<{
     data: {
       landlord: Record<string, unknown>
       units: Array<Record<string, unknown>>
+      previousUnits?: Array<Record<string, unknown>>
     }
   }>('/api/portal/landlord/portfolio')
 }
@@ -557,6 +589,7 @@ export async function createLandlordUnit(input: {
   municipal?: number | null
   purchasePrice?: number | null
   bankOwed?: number | null
+  leaseConfig?: Record<string, unknown> | null
 }) {
   return apiRequest<{ data: Record<string, unknown> }>('/api/portal/landlord/units', {
     method: 'POST',
@@ -572,6 +605,7 @@ export async function updateLandlordUnitDetails(
     municipal?: number | null
     purchasePrice?: number | null
     bankOwed?: number | null
+    leaseConfig?: Record<string, unknown> | null
   },
 ) {
   return apiRequest<{ data: Record<string, unknown> }>(
@@ -633,8 +667,11 @@ export async function fetchDocument(id: string) {
   }>(`/api/documents/${id}`)
 }
 
-export async function downloadDocument(id: string) {
-  const { data } = await fetchDocument(id)
+function triggerBrowserDownload(data: {
+  filename: string
+  mimeType: string
+  contentBase64: string
+}) {
   const binary = atob(data.contentBase64)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
@@ -645,6 +682,41 @@ export async function downloadDocument(id: string) {
   a.download = data.filename || 'document'
   a.click()
   URL.revokeObjectURL(url)
+}
+
+export async function downloadDocument(id: string) {
+  const { data } = await fetchDocument(id)
+  triggerBrowserDownload(data)
+}
+
+/** Download the signed lease for a tenant (agent, landlord, or that tenant). */
+export async function downloadTenantLease(tenantId: string) {
+  const { data } = await apiRequest<{
+    data: {
+      id: string
+      filename: string
+      mimeType: string
+      contentBase64: string
+      sizeBytes: number
+    }
+  }>(`/api/tenants/${tenantId}/lease`)
+  triggerBrowserDownload(data)
+  return data
+}
+
+/** Download the signed lease once an application is complete (all parties). */
+export async function downloadApplicationLease(applicationId: string) {
+  const { data } = await apiRequest<{
+    data: {
+      id: string
+      filename: string
+      mimeType: string
+      contentBase64: string
+      sizeBytes: number
+    }
+  }>(`/api/applications/${applicationId}/lease`)
+  triggerBrowserDownload(data)
+  return data
 }
 
 export async function fetchApartmentHistory(apartmentId: string) {
