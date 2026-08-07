@@ -1,23 +1,71 @@
 import { useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import SearchableSelect from '../components/SearchableSelect'
 import { useDashboard } from '../data/DashboardContext'
 import { isUnitVacant } from '../data/unitHelpers'
-import { formatMoney, paymentBadge, formatDate, nextMonthEndDate } from '../data/utils'
+import { formatMoney, paymentBadge, nextMonthEndDate } from '../data/utils'
 
 type TableFilter = 'all' | 'active' | 'vacant' | 'balance' | 'issues'
 
 export default function PortfolioPage() {
   const { state } = useDashboard()
   const [buildingId, setBuildingId] = useState('')
+  const [tenantId, setTenantId] = useState('')
   const [filter, setFilter] = useState<TableFilter>('all')
   const monthEndDue = nextMonthEndDate()
 
-  const activeTenants = state.tenants.filter((t) => t.status !== 'former').length
+  const currentTenants = useMemo(
+    () => state.tenants.filter((t) => t.status === 'active' || t.status === 'notice'),
+    [state.tenants],
+  )
+  const currentTenantIds = useMemo(
+    () => new Set(currentTenants.map((t) => t.id)),
+    [currentTenants],
+  )
+
+  const activeTenants = currentTenants.length
   const vacantUnits = state.apartments.filter((a) =>
     isUnitVacant(a.id, state.tenants),
   ).length
-  const openIssues = state.issues.filter((i) => i.status !== 'resolved').length
-  const overduePayments = state.tenants.filter((t) => t.balance > 0).length
+  const openIssues = state.issues.filter(
+    (i) =>
+      i.status !== 'resolved' &&
+      i.status !== 'rejected' &&
+      currentTenantIds.has(i.tenantId),
+  ).length
+  const overduePayments = currentTenants.filter((t) => t.balance > 0).length
+
+  const buildingOptions = useMemo(
+    () =>
+      state.buildings
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((b) => ({
+          value: b.id,
+          label: b.name,
+          searchText: `${b.name} ${b.address}`,
+        })),
+    [state.buildings],
+  )
+
+  const tenantOptions = useMemo(
+    () =>
+      currentTenants
+        .slice()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => {
+          const apartment = state.apartments.find((a) => a.id === t.apartmentId)
+          const building = apartment
+            ? state.buildings.find((b) => b.id === apartment.buildingId)
+            : undefined
+          return {
+            value: t.id,
+            label: t.name,
+            searchText: `${t.name} ${apartment?.unitNumber ?? ''} ${building?.name ?? ''}`,
+          }
+        }),
+    [currentTenants, state.apartments, state.buildings],
+  )
 
   const rows = useMemo(() => {
     return state.apartments
@@ -32,7 +80,10 @@ export default function PortfolioPage() {
         const vacant = isUnitVacant(apartment.id, state.tenants)
         const openIssueCount = tenant
           ? state.issues.filter(
-              (i) => i.tenantId === tenant.id && i.status !== 'resolved',
+              (i) =>
+                i.tenantId === tenant.id &&
+                i.status !== 'resolved' &&
+                i.status !== 'rejected',
             ).length
           : 0
         const badge = tenant
@@ -51,13 +102,14 @@ export default function PortfolioPage() {
         }
       })
       .filter((row) => {
+        if (tenantId && row.tenant?.id !== tenantId) return false
         if (filter === 'active') return Boolean(row.tenant)
         if (filter === 'vacant') return row.vacant
         if (filter === 'balance') return Boolean(row.tenant && row.tenant.balance > 0)
         if (filter === 'issues') return row.openIssueCount > 0
         return true
       })
-  }, [state, buildingId, filter, monthEndDue])
+  }, [state, buildingId, tenantId, filter, monthEndDue])
 
   function toggleFilter(next: TableFilter) {
     setFilter((prev) => (prev === next ? 'all' : next))
@@ -133,18 +185,22 @@ export default function PortfolioPage() {
                 Clear filter
               </button>
             ) : null}
-            <select
+            <SearchableSelect
               value={buildingId}
-              onChange={(e) => setBuildingId(e.target.value)}
-              aria-label="Filter by building"
-            >
-              <option value="">All buildings</option>
-              {state.buildings.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+              onChange={setBuildingId}
+              options={buildingOptions}
+              placeholder="Search buildings…"
+              allLabel="All buildings"
+              ariaLabel="Filter by building"
+            />
+            <SearchableSelect
+              value={tenantId}
+              onChange={setTenantId}
+              options={tenantOptions}
+              placeholder="Search tenants…"
+              allLabel="All tenants"
+              ariaLabel="Filter by tenant"
+            />
           </div>
         </div>
         <div className="panel-body" style={{ paddingTop: 0 }}>
@@ -154,9 +210,8 @@ export default function PortfolioPage() {
                 <th>Tenant</th>
                 <th>Building / unit</th>
                 <th>Rent</th>
-                <th>Next due</th>
                 <th>Deposit balance</th>
-                <th>Status</th>
+                <th>Payment status</th>
                 <th>Issues</th>
               </tr>
             </thead>
@@ -165,14 +220,9 @@ export default function PortfolioPage() {
                 <tr key={apartment.id}>
                   <td>
                     {tenant ? (
-                      <>
-                        <Link className="link-quiet" to={`/tenants/${tenant.id}`}>
-                          <strong>{tenant.name}</strong>
-                        </Link>
-                        <div style={{ fontSize: '0.8rem', color: 'var(--ink-muted)' }}>
-                          {tenant.email}
-                        </div>
-                      </>
+                      <Link className="link-quiet" to={`/tenants/${tenant.id}`}>
+                        <strong>{tenant.name}</strong>
+                      </Link>
                     ) : (
                       <span style={{ color: 'var(--ink-muted)' }}>No tenant assigned</span>
                     )}
@@ -186,7 +236,6 @@ export default function PortfolioPage() {
                     </div>
                   </td>
                   <td>{formatMoney(apartment.rent)}</td>
-                  <td>{tenant ? formatDate(monthEndDue) : '—'}</td>
                   <td>{tenant ? formatMoney(depositBalance) : '—'}</td>
                   <td>
                     <span className={`badge tone-${badge.tone}`}>{badge.label}</span>

@@ -87,7 +87,7 @@ export function paymentBadge(balance: number, nextDueDate?: string): {
     }
     return { label: 'Due', tone: 'due' }
   }
-  return { label: 'Paid', tone: 'paid' }
+  return { label: 'Up to date', tone: 'paid' }
 }
 
 export function initials(name: string) {
